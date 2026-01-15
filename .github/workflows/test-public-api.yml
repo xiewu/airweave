@@ -53,6 +53,7 @@ jobs:
           docker pull temporalio/auto-setup:1.24.2 &
           docker pull temporalio/ui:2.26.2 &
           docker pull vespaengine/vespa:8 &
+          docker pull svix/svix-server &
           docker pull alpine:3.19 &
           wait
           echo "All images pre-pulled successfully"

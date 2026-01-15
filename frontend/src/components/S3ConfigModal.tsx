@@ -32,10 +32,11 @@ export function S3ConfigModal({ isOpen, onClose, onSuccess }: S3ConfigModalProps
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Generate a unique external ID for this organization
+  // AWS external IDs must match: [\w+=,.@:\/-]*
   const [generatedExternalId] = useState(() => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let result = 'airweave-';
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 32; i++) {
       result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return result;

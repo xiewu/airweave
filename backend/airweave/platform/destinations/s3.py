@@ -39,7 +39,7 @@ class S3Destination(BaseDestination):
     S3 buckets without requiring long-lived access keys.
 
     Data Organization (ARF-compatible):
-        {bucket}/{prefix}/raw/{sync_id}/
+        {bucket}/{prefix}/raw/{collection_readable_id}/{sync_id}/
         ├── manifest.json                    # Sync metadata
         ├── entities/
         │   └── {safe_entity_id}.json        # Entity with class metadata
@@ -139,33 +139,52 @@ class S3Destination(BaseDestination):
     # =========================================================================
 
     async def _load_iam_credentials(self) -> None:
-        """Load IAM user credentials from Azure Key Vault."""
+        """Load IAM user credentials from Azure Key Vault or settings.
+
+        For local testing, set in .env or environment:
+        - AWS_S3_DESTINATION_ACCESS_KEY_ID
+        - AWS_S3_DESTINATION_SECRET_ACCESS_KEY
+        """
         try:
+            from airweave.core.config import settings
             from airweave.core.secrets import secret_client
 
-            if secret_client is None:
-                raise ImportError("Azure Key Vault secret client not available")
+            # Try Key Vault first (for deployed environments)
+            if secret_client is not None:
+                # Load credentials from Key Vault
+                # TODO: Move this to DestinationFactory
+                access_key_id = await secret_client.get_secret("aws-iam-access-key-id")
+                secret_access_key = await secret_client.get_secret("aws-iam-secret-access-key")
 
-            # Load credentials from Key Vault
-            # TODO: Move this to DestinationFactory
-            access_key_id = await secret_client.get_secret("aws-s3-destination-access-key-id")
-            secret_access_key = await secret_client.get_secret(
-                "aws-s3-destination-secret-access-key"
-            )
+                if not access_key_id or not secret_access_key:
+                    raise ValueError(
+                        "AWS S3 destination credentials not found in Key Vault. "
+                        "Ensure 'aws-iam-access-key-id' and "
+                        "'aws-iam-secret-access-key' are set."
+                    )
 
-            if not access_key_id or not secret_access_key:
-                raise ValueError(
-                    "AWS S3 destination credentials not found in Key Vault. "
-                    "Ensure 'aws-s3-destination-access-key-id' and "
-                    "'aws-s3-destination-secret-access-key' are set."
-                )
+                self._iam_access_key_id = access_key_id.value
+                self._iam_secret_access_key = secret_access_key.value
+                self.logger.debug("Loaded IAM user credentials from Key Vault")
 
-            self._iam_access_key_id = access_key_id.value
-            self._iam_secret_access_key = secret_access_key.value
+            # Fallback to settings/environment (for local testing)
+            else:
+                access_key_id = settings.AWS_S3_DESTINATION_ACCESS_KEY_ID
+                secret_access_key = settings.AWS_S3_DESTINATION_SECRET_ACCESS_KEY
 
-            self.logger.debug("Loaded IAM user credentials from Key Vault")
+                if not access_key_id or not secret_access_key:
+                    raise ValueError(
+                        "AWS S3 destination credentials not found. For local testing, set:\n"
+                        "  AWS_S3_DESTINATION_ACCESS_KEY_ID=...\n"
+                        "  AWS_S3_DESTINATION_SECRET_ACCESS_KEY=..."
+                    )
+
+                self._iam_access_key_id = access_key_id
+                self._iam_secret_access_key = secret_access_key
+                self.logger.debug("Loaded IAM user credentials from settings")
+
         except Exception as e:
-            raise ConnectionError(f"Failed to load AWS credentials from Key Vault: {e}") from e
+            raise ConnectionError(f"Failed to load AWS credentials: {e}") from e
 
     async def _assume_role(self) -> Dict[str, Any]:
         """Assume customer IAM role using IAM user credentials.
@@ -268,7 +287,7 @@ class S3Destination(BaseDestination):
 
     def _sync_path(self) -> str:
         """Get base path for sync's ARF data."""
-        return f"{self.bucket_prefix}raw/{self.sync_id}"
+        return f"{self.bucket_prefix}raw/{self.collection_readable_id}/{self.sync_id}"
 
     def _manifest_path(self) -> str:
         """Get manifest path."""
