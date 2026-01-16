@@ -2102,8 +2102,10 @@ async def _fetch_destination_counts(
                 async def count_vespa_sync(sync):
                     async with semaphore:
                         try:
+                            # Query all Vespa schemas (not just base_entity)
+                            all_schemas = ", ".join(VespaDestination._get_all_vespa_schemas())
                             yql = (
-                                f"select * from base_entity "
+                                f"select * from sources {all_schemas} "
                                 f"where airweave_system_metadata_sync_id contains '{sync.id}' "
                                 f"and airweave_system_metadata_collection_id contains '{collection_id}' "
                                 f"limit 0"

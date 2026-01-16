@@ -415,7 +415,7 @@ class SyncOrchestrator:
 
         # Check if source supports continuous/incremental sync (class attribute)
         source_class = type(self.sync_context.source_instance)
-        source_supports_continuous = source_class._supports_continuous
+        source_supports_continuous = getattr(source_class, "_supports_continuous", False)
 
         self.sync_context.logger.debug(
             f"Orphan cleanup check: has_cursor_data={has_cursor_data}, "
