@@ -238,60 +238,9 @@ echo ""
 echo "Waiting for services to initialize..."
 sleep 10
 
-# Check if Vespa document API is ready (wait for vespa-init to complete)
-echo "Checking Vespa readiness..."
-MAX_VESPA_RETRIES=60
-VESPA_RETRY_COUNT=0
-VESPA_READY=false
-
-while [ $VESPA_RETRY_COUNT -lt $MAX_VESPA_RETRIES ]; do
-  # Check if vespa-init has completed (exited with status 0)
-  INIT_STATUS=$(${CONTAINER_CMD} inspect airweave-vespa-init --format='{{.State.Status}}' 2>/dev/null || echo "not_found")
-  INIT_EXIT_CODE=$(${CONTAINER_CMD} inspect airweave-vespa-init --format='{{.State.ExitCode}}' 2>/dev/null || echo "1")
-
-  if [ "$INIT_STATUS" = "exited" ] && [ "$INIT_EXIT_CODE" = "0" ]; then
-    # Init completed, now verify document API is actually ready for requests
-    # Use timeout and write to temp file to avoid concatenation issues
-    if timeout 5 curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/document/v1/ > /tmp/vespa_status_$$ 2>&1; then
-      DOC_STATUS=$(cat /tmp/vespa_status_$$ 2>/dev/null | tr -cd '0-9' || echo "000")
-      rm -f /tmp/vespa_status_$$
-      
-      # Any HTTP response code (400, 404, 200, etc.) means API is responding
-      # Only "000" or empty means connection failed
-      if [ -n "$DOC_STATUS" ] && [ "$DOC_STATUS" != "000" ] && [ "$DOC_STATUS" -ge 100 ] 2>/dev/null; then
-        echo "✅ Vespa is ready! (init completed, document API verified: HTTP $DOC_STATUS)"
-        VESPA_READY=true
-        break
-      else
-        echo "⏳ Vespa init done but document API not responding (attempt $((VESPA_RETRY_COUNT + 1))/$MAX_VESPA_RETRIES)"
-      fi
-    else
-      rm -f /tmp/vespa_status_$$
-      echo "⏳ Vespa document API not reachable (attempt $((VESPA_RETRY_COUNT + 1))/$MAX_VESPA_RETRIES)"
-    fi
-  elif [ "$INIT_STATUS" = "exited" ] && [ "$INIT_EXIT_CODE" != "0" ]; then
-    echo "❌ Vespa init container failed with exit code $INIT_EXIT_CODE"
-    echo "Check vespa-init logs with: ${CONTAINER_CMD} logs airweave-vespa-init"
-    break
-  else
-    echo "⏳ Waiting for Vespa init... (attempt $((VESPA_RETRY_COUNT + 1))/$MAX_VESPA_RETRIES, init_status=$INIT_STATUS)"
-  fi
-
-  VESPA_RETRY_COUNT=$((VESPA_RETRY_COUNT + 1))
-  sleep 5
-done
-
-if [ "$VESPA_READY" = false ]; then
-  echo "❌ Vespa not ready after $((MAX_VESPA_RETRIES * 5)) seconds"
-  echo "Check vespa logs: ${CONTAINER_CMD} logs airweave-vespa"
-  echo "Check vespa-init logs: ${CONTAINER_CMD} logs airweave-vespa-init"
-  echo ""
-  echo "Vespa troubleshooting:"
-  echo "  1. Check if Vespa container is running: ${CONTAINER_CMD} ps | grep vespa"
-  echo "  2. Check Vespa health: curl http://localhost:8081/state/v1/health"
-  echo "  3. Check document API: curl http://localhost:8081/document/v1/"
-  exit 1
-fi
+# Vespa is disabled by default (uses Qdrant only for simpler local setup)
+# To enable Vespa, run with --profile vespa
+echo "⏭️  Vespa skipped (not needed for local development, uses Qdrant only)"
 
 # Check if backend is healthy (with retries)
 echo "Checking backend health..."
@@ -362,11 +311,7 @@ echo "Other services:"
 echo "📊 Temporal UI:    http://localhost:8088"
 echo "🗄️  PostgreSQL:    localhost:5432"
 echo "🔍 Qdrant:         http://localhost:6333"
-if curl -sf http://localhost:8081/state/v1/health | grep -q '"up"' 2>/dev/null; then
-  echo "🔎 Vespa:          http://localhost:8081"
-else
-  echo "⚠️  Vespa:          Not responding (check logs with: docker logs airweave-vespa)"
-fi
+echo "⏭️  Vespa:          Skipped (enable with --profile vespa)"
 
 if [ "$USE_LOCAL_EMBEDDINGS" = true ]; then
   echo "🤖 Embeddings:    http://localhost:9878 (local text2vec)"
