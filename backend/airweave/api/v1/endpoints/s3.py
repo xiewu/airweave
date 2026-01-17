@@ -104,6 +104,9 @@ async def configure_s3_destination(
     existing_connection = result.scalar_one_or_none()
 
     if existing_connection:
+        # Store connection ID before any commit (avoids SQLAlchemy lazy-load issues)
+        existing_connection_id = existing_connection.id
+
         # Update existing connection credentials
         if existing_connection.integration_credential_id:
             cred = await crud.integration_credential.get(
@@ -115,7 +118,7 @@ async def configure_s3_destination(
                 await db.refresh(cred)
 
         return S3ConfigResponse(
-            connection_id=str(existing_connection.id),
+            connection_id=str(existing_connection_id),
             status="updated",
             message="S3 connection updated successfully",
         )
