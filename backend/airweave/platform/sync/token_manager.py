@@ -80,6 +80,9 @@ class TokenManager:
                 f"TokenManager requires a token to manage."
             )
 
+        # Check if credentials have a refresh token (needed for refresh capability check)
+        self._has_refresh_token = self._check_has_refresh_token(initial_credentials)
+
         # Set last refresh time to 0 to force an immediate refresh on first use
         # This ensures we always start a sync with a fresh token, even if the stored
         # token was issued hours/days ago and has since expired
@@ -93,15 +96,42 @@ class TokenManager:
         """Determine if this source supports token refresh."""
         # Direct injection tokens should not be refreshed
         if self.is_direct_injection:
+            self.logger.debug(
+                f"Token refresh disabled for {self.source_short_name}: direct injection mode"
+            )
             return False
 
         # If auth provider instance is available, we can always refresh through it
         if self.auth_provider_instance:
             return True
 
-        # For standard OAuth (without auth provider), we assume refresh is possible
-        # The actual refresh capability will be determined when attempting refresh
+        # Check if credentials contain a refresh token
+        # This handles OAuthTokenAuthentication where user provided access_token only
+        if not self._has_refresh_token:
+            self.logger.debug(
+                f"Token refresh disabled for {self.source_short_name}: no refresh "
+                "token in credentials"
+            )
+            return False
+
+        # For standard OAuth with refresh token, refresh is possible
         return True
+
+    def _check_has_refresh_token(self, credentials: Any) -> bool:
+        """Check if credentials contain a refresh token.
+
+        This is used to determine if token refresh is possible for OAuth sources
+        created via direct token injection (OAuthTokenAuthentication).
+        """
+        if isinstance(credentials, dict):
+            refresh_token = credentials.get("refresh_token")
+            return bool(refresh_token and str(refresh_token).strip())
+
+        if hasattr(credentials, "refresh_token"):
+            refresh_token = credentials.refresh_token
+            return bool(refresh_token and str(refresh_token).strip())
+
+        return False
 
     async def get_valid_token(self) -> str:
         """Get a valid access token, refreshing if necessary.
