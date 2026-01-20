@@ -401,11 +401,8 @@ export function EditWebhookModal({
                   type="url"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  className={cn("h-9", urlError && "border-destructive")}
+                  className="h-9"
                 />
-                {urlError && (
-                  <p className="text-xs text-destructive">{urlError}</p>
-                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Event Types</Label>
