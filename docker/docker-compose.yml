@@ -78,6 +78,7 @@ services:
       - AUTH_ENABLED=false
       # Svix configuration
       - SVIX_URL=http://svix:8071
+      - SVIX_JWT_SECRET=${SVIX_JWT_SECRET:-default_signing_secret}
       - SVIX_AUTH_TOKEN=${SVIX_AUTH_TOKEN:-}
     depends_on:
       postgres:
@@ -218,6 +219,7 @@ services:
       - TEMPORAL_ENABLED=true
       # Svix configuration
       - SVIX_URL=http://svix:8071
+      - SVIX_JWT_SECRET=${SVIX_JWT_SECRET:-default_signing_secret}
       - SVIX_AUTH_TOKEN=${SVIX_AUTH_TOKEN:-}
     volumes:
       - ../backend:/app
@@ -288,7 +290,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "svix-server healthcheck http://localhost:8071"]
+      test: [ "CMD-SHELL", "svix-server healthcheck http://localhost:8071" ]
       interval: 5s
       timeout: 5s
       retries: 30

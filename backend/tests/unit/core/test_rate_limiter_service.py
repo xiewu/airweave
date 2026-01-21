@@ -40,9 +40,8 @@ def mock_ctx(organization_id):
 @pytest.fixture
 def mock_settings():
     """Mock settings to enable rate limiting."""
-    with patch("airweave.core.config.settings") as mock:
-        mock.LOCAL_DEVELOPMENT = False
-        mock.RATE_LIMIT_ENABLED = True
+    with patch("airweave.core.rate_limiter_service.settings") as mock:
+        mock.DISABLE_RATE_LIMIT = False
         yield mock
 
 

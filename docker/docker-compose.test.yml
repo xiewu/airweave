@@ -73,7 +73,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "svix-server healthcheck http://localhost:8071"]
+      test: [ "CMD-SHELL", "svix-server healthcheck http://localhost:8071" ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -112,6 +112,7 @@ services:
       - AUTH_ENABLED=false
       # Svix configuration
       - SVIX_URL=http://svix:8071
+      - SVIX_JWT_SECRET=test_signing_secret
       - SVIX_AUTH_TOKEN=
 
     ports:
