@@ -5,6 +5,7 @@ import importlib
 import inspect
 import os
 import re
+from pathlib import Path
 from typing import Callable, Dict, Type
 from uuid import UUID
 
@@ -17,6 +18,9 @@ from airweave.models.entity_definition import EntityType
 from airweave.platform.auth_providers._base import BaseAuthProvider
 from airweave.platform.destinations._base import BaseDestination
 from airweave.platform.sources._base import BaseSource
+
+# Compute platform directory from this file's location (works regardless of cwd)
+PLATFORM_DIR = Path(__file__).parent
 
 sync_logger = logger.with_prefix("Platform sync: ").with_context(component="platform_sync")
 
@@ -155,11 +159,8 @@ def _process_module_classes(module, components: Dict[str, list[Type | Callable]]
 # using CodeChunker and SemanticChunker, not decorator-based transformers
 
 
-def _get_decorated_classes(directory: str) -> Dict[str, list[Type | Callable]]:
-    """Scan directory for decorated classes and functions.
-
-    Args:
-        directory (str): The directory to scan.
+def _get_decorated_classes() -> Dict[str, list[Type | Callable]]:
+    """Scan platform directory for decorated classes and functions.
 
     Returns:
         Dict[str, list[Type | Callable]]: Dictionary of decorated classes and functions by type.
@@ -177,11 +178,11 @@ def _get_decorated_classes(directory: str) -> Dict[str, list[Type | Callable]]:
         "auth_providers": [],
     }
 
-    base_package = directory.replace("/", ".")
+    base_package = "airweave.platform"
 
-    for root, _, files in os.walk(directory):
+    for root, _, files in os.walk(PLATFORM_DIR):
         # Skip files in the root directory
-        if root == directory:
+        if Path(root) == PLATFORM_DIR:
             continue
 
         for filename in files:
@@ -198,7 +199,7 @@ def _get_decorated_classes(directory: str) -> Dict[str, list[Type | Callable]]:
                     )
                     continue
 
-            relative_path = os.path.relpath(root, directory)
+            relative_path = os.path.relpath(root, PLATFORM_DIR)
             module_path = os.path.join(relative_path, filename[:-3]).replace("/", ".")
             full_module_name = f"{base_package}.{module_path}"
 
@@ -330,7 +331,7 @@ async def _sync_entity_definitions(db: AsyncSession) -> Dict[str, dict]:
     # Get all Python files in the entities directory that aren't base or init files
     entity_files = [
         f
-        for f in os.listdir("airweave/platform/entities")
+        for f in os.listdir(PLATFORM_DIR / "entities")
         if f.endswith(".py") and not f.startswith("__")
     ]
 
@@ -489,7 +490,6 @@ async def _sync_sources(
             federated_search=getattr(source_class, "_federated_search", False),
             supports_temporal_relevance=getattr(source_class, "_supports_temporal_relevance", True),
             rate_limit_level=rate_limit_level,
-            supports_access_control=getattr(source_class, "_supports_access_control", False),
         )
         source_definitions.append(source_def)
 
@@ -553,11 +553,10 @@ async def _sync_auth_providers(
 # CodeChunker and SemanticChunker in entity_pipeline.py, not decorator-based transformers
 
 
-async def sync_platform_components(platform_dir: str, db: AsyncSession) -> None:
+async def sync_platform_components(db: AsyncSession) -> None:
     """Sync all platform components with the database.
 
     Args:
-        platform_dir (str): Directory containing platform components
         db (AsyncSession): Database session
 
     Raises:
@@ -567,7 +566,7 @@ async def sync_platform_components(platform_dir: str, db: AsyncSession) -> None:
     sync_logger.info("Starting platform components sync...")
 
     try:
-        components = _get_decorated_classes(platform_dir)
+        components = _get_decorated_classes()
         c = components
 
         # Log component counts to help diagnose issues

@@ -8,13 +8,16 @@ Accepts both Qdrant Filter objects and Airweave canonical filter dicts
 (Dict[str, Any] with must/should/must_not structure).
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from airweave.api.context import ApiContext
 from airweave.schemas.search import AirweaveFilter
 from airweave.search.context import SearchContext
 
 from ._base import SearchOperation
+
+if TYPE_CHECKING:
+    from airweave.search.state import SearchState
 
 # Optional import for backwards compatibility with Qdrant Filter objects
 try:
@@ -45,7 +48,7 @@ class UserFilter(SearchOperation):
         self.filter = filter
 
     def depends_on(self) -> List[str]:
-        """Depends on query interpretation.
+        """Depends on operations that may write to state["filter"].
 
         Reads from state:
         - state["filter"] from QueryInterpretation (if ran)
@@ -55,21 +58,25 @@ class UserFilter(SearchOperation):
     async def execute(
         self,
         context: SearchContext,
-        state: dict[str, Any],
+        state: "SearchState",
         ctx: ApiContext,
     ) -> None:
-        """Merge user filter with extracted filter."""
+        """Merge user filter with existing filter in state.
+
+        The existing filter may include:
+        - Extracted filter (from QueryInterpretation)
+        """
         ctx.logger.debug("[UserFilter] Applying user filter")
 
-        # Get existing filter from state (written by QueryInterpretation if it ran)
-        existing_filter = state.get("filter")
+        # Get existing filter from state (may include access control + extracted filters)
+        existing_filter = state.filter
         ctx.logger.debug(f"[UserFilter] Existing filter: {existing_filter}")
 
         # Normalize user filter to dict and map keys
         user_filter_dict = self._normalize_user_filter()
         ctx.logger.debug(f"[UserFilter] User filter dict: {user_filter_dict}")
 
-        # Merge filters using AND semantics
+        # Merge user filter with existing filter using AND semantics
         merged_filter = self._merge_filters(user_filter_dict, existing_filter)
         ctx.logger.debug(f"[UserFilter] Merged filter: {merged_filter}")
 
@@ -85,8 +92,8 @@ class UserFilter(SearchOperation):
                 op_name=self.__class__.__name__,
             )
 
-        # Write final filter to state (overwrites QueryInterpretation's filter if present)
-        state["filter"] = merged_filter
+        # Write final filter to state
+        state.filter = merged_filter
 
         # Emit filter applied
         if merged_filter:

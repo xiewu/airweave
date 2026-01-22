@@ -352,8 +352,12 @@ async def _token_present_in_collection(
     client, readable_id: str, token: str, limit: int = 1000, expect_present: bool = True
 ) -> bool:
     """
-    Check if `token` appears in any result payload (case-insensitive).
+    Check if `token` appears in any search result (case-insensitive).
     Uses a fixed limit of 1000 for comprehensive search.
+
+    Note: Search results use the new AirweaveSearchResult structure where fields
+    like `name`, `id`, `textual_representation` are at the top level (not nested
+    in a `payload` dict).
 
     Args:
         client: Airweave client
@@ -376,15 +380,15 @@ async def _token_present_in_collection(
         if results and len(results) > 0:
             logger.info("📋 Sample results (showing up to 3):")
             for i, r in enumerate(results[:3]):
-                payload = r.get("payload", {})
                 score = r.get("score", 0)
-                name = payload.get("name") or payload.get("title") or payload.get("id", "Unknown")
+                # New structure: name is at top level, not in payload
+                name = r.get("name") or r.get("id", "Unknown")
                 logger.info(f"   • Result {i+1}: {name} (score: {score:.3f})")
 
         # Check if token is present in any result
+        # New structure: search entire result dict (fields are at top level)
         for i, r in enumerate(results):
-            payload = r.get("payload", {})
-            if payload and token_lower in str(payload).lower():
+            if r and token_lower in str(r).lower():
                 if expect_present:
                     logger.info(f"✅ Token '{token}' found in vector database (as expected)")
                 else:
@@ -772,9 +776,9 @@ class VerifyCompleteDeletionStep(TestStep):
                         client, self.context.collection_readable_id, expected_token, 5
                     )
                     for r in results[:2]:  # Show first 2 results
-                        payload = r.get("payload", {})
+                        # New structure: id and name are at top level
                         self.logger.info(
-                            f"   Found in Qdrant: id={payload.get('id')}, name={payload.get('name')}"
+                            f"   Found in Qdrant: id={r.get('id')}, name={r.get('name')}"
                         )
                 except Exception as e:
                     self.logger.debug(f"Could not get detailed results: {e}")
@@ -841,10 +845,10 @@ class VerifyCompleteDeletionStep(TestStep):
                         f"🔍 Found {count} results for pattern '{pattern}'"
                     )
                     for r in results[:3]:
-                        payload = r.get("payload", {})
+                        # New structure: name and score are at top level
                         score = r.get("score")
                         self.logger.info(
-                            f"   - {payload.get('name', 'Unknown')} (score: {score})"
+                            f"   - {r.get('name', 'Unknown')} (score: {score})"
                         )
 
             if total == 0:
@@ -971,10 +975,9 @@ class VerifyRawDataStep(TestStep):
         if storage_path:
             base_path = Path(storage_path)
         else:
-            # Try common local development paths
+            # Try common local development paths (local_storage lives at repo root)
             candidates = [
                 Path("local_storage"),
-                Path("backend/local_storage"),
                 Path("/app/local_storage"),
             ]
             base_path = None

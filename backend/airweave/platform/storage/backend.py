@@ -140,7 +140,7 @@ class FilesystemBackend(StorageBackend):
     """Filesystem-based storage backend.
 
     Works with:
-    - Local development: ./local_storage
+    - Local development: local_storage/ (at repo root, mounted to /app/local_storage)
     - Kubernetes: PVC-mounted path (e.g., /data/airweave-storage)
 
     Thread-safe for basic operations (relies on OS-level file locking).

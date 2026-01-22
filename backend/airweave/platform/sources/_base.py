@@ -240,7 +240,7 @@ class BaseSource:
     ) -> AsyncGenerator["MembershipTuple", None]:
         r"""Generate access control membership tuples.
 
-        Only implement this if your source has @source(supports_access_control=True).
+        Optional method for sources that support access control.
 
         Yields user→group and group→group membership tuples for access
         control resolution at search time. These tuples are persisted to

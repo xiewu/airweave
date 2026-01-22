@@ -14,7 +14,7 @@ from airweave.analytics import business_events
 from airweave.api import deps
 from airweave.api.context import ApiContext
 from airweave.webhooks.constants.event_types import EventType
-from airweave.webhooks.service import service
+from airweave.webhooks.service import service as webhooks_service
 
 router = APIRouter()
 
@@ -60,7 +60,7 @@ async def get_messages(
     Returns:
         List of event messages.
     """
-    messages, error = await service.get_messages(ctx.organization, event_types=event_types)
+    messages, error = await webhooks_service.get_messages(ctx.organization, event_types=event_types)
     if error:
         raise HTTPException(status_code=500, detail=error.message)
     return messages
@@ -80,7 +80,7 @@ async def get_message(
     Returns:
         The event message with its payload.
     """
-    message, error = await service.get_message(ctx.organization, message_id)
+    message, error = await webhooks_service.get_message(ctx.organization, message_id)
     if error:
         raise HTTPException(status_code=500, detail=error.message)
     return message
@@ -100,7 +100,9 @@ async def get_message_attempts(
     Returns:
         List of delivery attempts for this message.
     """
-    attempts, error = await service.get_message_attempts_by_message(ctx.organization, message_id)
+    attempts, error = await webhooks_service.get_message_attempts_by_message(
+        ctx.organization, message_id
+    )
     if error:
         raise HTTPException(status_code=500, detail=error.message)
     return attempts or []
@@ -118,7 +120,7 @@ async def get_subscriptions(
     Returns:
         List of webhook subscriptions.
     """
-    endpoints, error = await service.get_endpoints(ctx.organization)
+    endpoints, error = await webhooks_service.get_endpoints(ctx.organization)
     if error:
         raise HTTPException(status_code=500, detail=error.message)
     return endpoints
@@ -138,11 +140,11 @@ async def get_subscription(
     Returns:
         The subscription details with message delivery attempts.
     """
-    endpoint, error = await service.get_endpoint(ctx.organization, subscription_id)
+    endpoint, error = await webhooks_service.get_endpoint(ctx.organization, subscription_id)
     if error:
         raise HTTPException(status_code=500, detail=error.message)
 
-    message_attempts, attempts_error = await service.get_message_attempts_by_endpoint(
+    message_attempts, attempts_error = await webhooks_service.get_message_attempts_by_endpoint(
         ctx.organization, subscription_id
     )
     if attempts_error:
@@ -165,7 +167,7 @@ async def create_subscription(
     Returns:
         The created subscription.
     """
-    endpoint, error = await service.create_endpoint(
+    endpoint, error = await webhooks_service.create_endpoint(
         ctx.organization, str(request.url), request.event_types, request.secret
     )
     if error:
@@ -193,7 +195,7 @@ async def delete_subscription(
         subscription_id: The ID of the subscription to delete.
         ctx: The API context containing organization info.
     """
-    error = await service.delete_endpoint(ctx.organization, subscription_id)
+    error = await webhooks_service.delete_endpoint(ctx.organization, subscription_id)
     if error:
         raise HTTPException(status_code=500, detail=error.message)
 
@@ -218,7 +220,7 @@ async def patch_subscription(
         The updated subscription.
     """
     url = str(request.url) if request.url else None
-    endpoint, error = await service.patch_endpoint(
+    endpoint, error = await webhooks_service.patch_endpoint(
         ctx.organization, subscription_id, url, request.event_types
     )
     if error:
@@ -250,7 +252,7 @@ async def get_subscription_secret(
     Returns:
         The subscription's signing secret.
     """
-    secret, error = await service.get_endpoint_secret(ctx.organization, subscription_id)
+    secret, error = await webhooks_service.get_endpoint_secret(ctx.organization, subscription_id)
     if error:
         raise HTTPException(status_code=500, detail=error.message)
 

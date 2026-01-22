@@ -434,6 +434,12 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "rate_limit: tests that consume rate limit quota (run last)"
     )
+    config.addinivalue_line(
+        "markers", "svix: tests that require Svix to be running (skipped in CI)"
+    )
+    config.addinivalue_line(
+        "markers", "api_rate_limit: tests that consume API rate limit quota (skipped in CI)"
+    )
 
 
 def pytest_collection_modifyitems(config, items):

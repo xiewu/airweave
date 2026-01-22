@@ -75,9 +75,6 @@ backend/coverage.xml
 
 coverage.xml
 
-# Local storage folder
-local_storage/
-
 monke/venv/
 logs/
 monke/.runs/

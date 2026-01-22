@@ -119,6 +119,7 @@ services:
       - "9001:8001"
     volumes:
       - ../backend:/app
+      - ../local_storage:/app/local_storage
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8001/health" ]
       interval: 5s

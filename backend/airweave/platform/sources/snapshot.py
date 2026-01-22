@@ -15,7 +15,7 @@ Usage:
     - credentials: {"placeholder": "snapshot"} (required for API)
 
 The path can be:
-- A local filesystem path (for evals): "/path/to/airweave/backend/local_storage/raw/{sync_id}"
+- A local filesystem path (for evals): "/path/to/airweave/local_storage/raw/{sync_id}"
 - A storage-relative path (for blob): "raw/{sync_id}"
 - A full Azure blob URL: "https://{account}.blob.core.windows.net/{container}/{path}"
 

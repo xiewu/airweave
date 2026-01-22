@@ -38,7 +38,6 @@ from qdrant_client.local.local_collection import DEFAULT_VECTOR_NAME
 
 from airweave.core.config import settings
 from airweave.core.logging import ContextualLogger
-from airweave.schemas.search import RetrievalStrategy
 from airweave.core.logging import logger as default_logger
 from airweave.platform.configs.auth import QdrantAuthConfig
 from airweave.platform.decorators import destination
@@ -48,7 +47,13 @@ from airweave.platform.destinations.collection_strategy import (
     get_physical_collection_name,
 )
 from airweave.platform.entities._base import BaseEntity
-from airweave.schemas.search import AirweaveTemporalConfig, SearchResult
+from airweave.schemas.search import AirweaveTemporalConfig, RetrievalStrategy
+from airweave.schemas.search_result import (
+    AccessControlResult,
+    AirweaveSearchResult,
+    BreadcrumbResult,
+    SystemMetadataResult,
+)
 
 
 class DecayConfig(BaseModel):
@@ -79,7 +84,7 @@ KEYWORD_VECTOR_NAME = "bm25"
     auth_config_class=QdrantAuthConfig,
     supports_vector=True,
     requires_client_embedding=True,
-    supports_temporal_relevance=True,
+    supports_temporal_relevance=False,  # Disabled while Vespa support is pending
 )
 class QdrantDestination(VectorDBDestination):
     """Qdrant destination with multi-tenant support and legacy compatibility."""
@@ -87,11 +92,11 @@ class QdrantDestination(VectorDBDestination):
     # Default write concurrency (simple, code-local tuning)
     DEFAULT_WRITE_CONCURRENCY: int = 16
 
-    def __init__(self, soft_fail: bool = False):
+    def __init__(self, soft_fail: bool = True):
         """Initialize defaults and placeholders for connection and collection state.
 
         Args:
-            soft_fail: If True, errors won't fail the sync (default False)
+            soft_fail: If True, errors won't fail the sync (default True - Qdrant is secondary)
         """
         super().__init__(soft_fail=soft_fail)
         # Logical identifiers (from SQL)
@@ -127,7 +132,7 @@ class QdrantDestination(VectorDBDestination):
         credentials: Optional[QdrantAuthConfig] = None,
         config: Optional[dict] = None,
         logger: Optional[ContextualLogger] = None,
-        soft_fail: bool = False,
+        soft_fail: bool = True,
     ) -> "QdrantDestination":
         """Create and return a connected destination (matches source pattern).
 
@@ -140,7 +145,7 @@ class QdrantDestination(VectorDBDestination):
             credentials: Optional QdrantAuthConfig with url and api_key (None for native)
             config: Unused (kept for interface consistency with sources)
             logger: Logger instance
-            soft_fail: If True, errors won't fail the sync (default False)
+            soft_fail: If True, errors won't fail the sync (default True - Qdrant is secondary)
 
         Returns:
             Configured QdrantDestination instance with multi-tenant shared collection
@@ -431,14 +436,16 @@ class QdrantDestination(VectorDBDestination):
         # Validate required fields first
         if not entity.airweave_system_metadata:
             raise ValueError(f"Entity {entity.entity_id} has no system metadata")
-        if not entity.airweave_system_metadata.vectors:
-            raise ValueError(f"Entity {entity.entity_id} has no vector in system metadata")
+        if entity.airweave_system_metadata.dense_embedding is None:
+            raise ValueError(f"Entity {entity.entity_id} has no dense_embedding in system metadata")
         if not entity.airweave_system_metadata.sync_id:
             raise ValueError(f"Entity {entity.entity_id} has no sync_id in system metadata")
 
-        # Get entity data as dict, excluding vectors to avoid numpy serialization issues
+        # Get entity data as dict, excluding embeddings to avoid numpy serialization issues
         entity_data = entity.model_dump(
-            mode="json", exclude_none=True, exclude={"airweave_system_metadata": {"vectors"}}
+            mode="json",
+            exclude_none=True,
+            exclude={"airweave_system_metadata": {"dense_embedding", "sparse_embedding"}},
         )
 
         # CRITICAL: Remove explicit None values from timestamps (Pydantic may include them)
@@ -465,8 +472,9 @@ class QdrantDestination(VectorDBDestination):
 
         point_id = self._make_point_uuid(entity.airweave_system_metadata.sync_id, entity.entity_id)
 
-        sv = entity.airweave_system_metadata.vectors[1]
+        # Build sparse vector part if present
         sparse_part: dict = {}
+        sv = entity.airweave_system_metadata.sparse_embedding
         if sv is not None:
             obj = sv.as_object() if hasattr(sv, "as_object") else sv
             if isinstance(obj, dict):
@@ -474,7 +482,8 @@ class QdrantDestination(VectorDBDestination):
 
         return rest.PointStruct(
             id=point_id,
-            vector={DEFAULT_VECTOR_NAME: entity.airweave_system_metadata.vectors[0]} | sparse_part,
+            vector={DEFAULT_VECTOR_NAME: entity.airweave_system_metadata.dense_embedding}
+            | sparse_part,
             payload=entity_data,
         )
 
@@ -914,7 +923,7 @@ class QdrantDestination(VectorDBDestination):
             **({"limit": limit} if limit is not None else {}),
         }
 
-    async def _prepare_query_request(
+    async def _prepare_query_request(  # noqa: C901
         self,
         dense_vector: list[float] | None,
         limit: int,
@@ -962,13 +971,17 @@ class QdrantDestination(VectorDBDestination):
                 sparse_vector.as_object() if hasattr(sparse_vector, "as_object") else sparse_vector
             )
 
-            prefetch_limit = 5000
+            # Prefetch limit controls how many candidates each neural/sparse branch fetches
+            # before RRF fusion. Trade-off: higher = better recall, lower = less memory.
+            # 5000 was causing OOM with expand_query (5 queries × 5000 × 2 = 50K vectors).
+            # 1000 provides good recall while staying under memory limits.
+            prefetch_limit = 1000
             if decay_config is not None:
                 try:
                     weight = max(0.0, min(1.0, float(getattr(decay_config, "weight", 0.0) or 0.0)))
                     if weight > 0.3:
-                        # Allow up to 10K for high temporal weight
-                        prefetch_limit = int(5000 * (1 + weight))
+                        # Allow up to 2K for high temporal weight
+                        prefetch_limit = int(1000 * (1 + weight))
                 except Exception:
                     pass
 
@@ -1004,8 +1017,8 @@ class QdrantDestination(VectorDBDestination):
                 )
                 query_request_params = {"prefetch": [rrf_prefetch], "query": decay_params["query"]}
 
-            # Ensure top-level limit is set for final results
-            query_request_params["limit"] = limit
+        # Ensure top-level limit is set for final results
+        query_request_params["limit"] = limit
 
         return rest.QueryRequest(**query_request_params)
 
@@ -1144,7 +1157,7 @@ class QdrantDestination(VectorDBDestination):
         sparse_embeddings: Optional[List[Any]] = None,
         retrieval_strategy: str = "hybrid",
         temporal_config: Optional[AirweaveTemporalConfig] = None,
-    ) -> List[SearchResult]:
+    ) -> List[AirweaveSearchResult]:
         """Execute search against Qdrant using pre-computed embeddings.
 
         Qdrant requires client-side embeddings (unlike Vespa which embeds server-side).
@@ -1162,10 +1175,10 @@ class QdrantDestination(VectorDBDestination):
             temporal_config: Optional temporal config (translated to DecayConfig internally)
 
         Returns:
-            List of SearchResult objects
+            List of AirweaveSearchResult objects (unified format for all destinations)
 
         Raises:
-            ValueError: If embeddings are not provided for strategies that require them
+            ValueError: If required embeddings are not provided for the strategy
         """
         # Keyword-only searches don't need dense embeddings
         if retrieval_strategy != RetrievalStrategy.KEYWORD.value and not dense_embeddings:
@@ -1180,8 +1193,6 @@ class QdrantDestination(VectorDBDestination):
                 "Keyword search requires sparse embeddings. "
                 "Ensure EmbedQuery operation generated sparse embeddings."
             )
-
-        primary_query = queries[0] if queries else ""
 
         # Translate temporal config to Qdrant-native DecayConfig
         decay_config = self.translate_temporal(temporal_config)
@@ -1199,7 +1210,6 @@ class QdrantDestination(VectorDBDestination):
         num_queries = self._get_query_count(
             dense_vectors_to_use, sparse_embeddings, retrieval_strategy
         )
-
         raw_results = await self.bulk_search(
             dense_vectors=dense_vectors_to_use,
             limit=limit,
@@ -1211,17 +1221,109 @@ class QdrantDestination(VectorDBDestination):
             offset=offset,
         )
 
-        # Convert to SearchResult format
+        # Convert to unified AirweaveSearchResult format
+        results = self._convert_to_airweave_results(raw_results)
+
+        self.logger.debug(f"[QdrantSearch] Retrieved {len(results)} results")
+        return results
+
+    def _convert_to_airweave_results(self, raw_results: List[dict]) -> List[AirweaveSearchResult]:
+        """Convert raw Qdrant results to AirweaveSearchResult format.
+
+        Transforms Qdrant's payload structure into the unified AirweaveSearchResult
+        format that matches what Vespa returns.
+
+        Args:
+            raw_results: List of raw result dicts from bulk_search
+
+        Returns:
+            List of AirweaveSearchResult objects
+        """
         results = []
         for r in raw_results:
-            result = SearchResult(
+            payload = r.get("payload", {})
+
+            # Extract system metadata from nested dict
+            sys_meta = payload.get("airweave_system_metadata", {})
+            system_metadata = SystemMetadataResult(
+                entity_type=sys_meta.get("entity_type", ""),
+                source_name=sys_meta.get("source_name"),
+                sync_id=sys_meta.get("sync_id"),
+                sync_job_id=sys_meta.get("sync_job_id"),
+                original_entity_id=sys_meta.get("original_entity_id"),
+                chunk_index=sys_meta.get("chunk_index"),
+            )
+
+            # Extract access control from nested dict
+            access = None
+            access_data = payload.get("access")
+            if access_data:
+                access = AccessControlResult(
+                    is_public=access_data.get("is_public", False),
+                    viewers=access_data.get("viewers", []),
+                )
+
+            # Extract breadcrumbs
+            breadcrumbs = []
+            raw_breadcrumbs = payload.get("breadcrumbs", [])
+            if raw_breadcrumbs:
+                for bc in raw_breadcrumbs:
+                    if isinstance(bc, dict):
+                        breadcrumbs.append(
+                            BreadcrumbResult(
+                                entity_id=bc.get("entity_id", ""),
+                                name=bc.get("name", ""),
+                                entity_type=bc.get("entity_type", ""),
+                            )
+                        )
+
+            # Parse timestamps (Qdrant stores as ISO strings)
+            created_at = None
+            updated_at = None
+            if payload.get("created_at"):
+                try:
+                    created_at = datetime.fromisoformat(
+                        payload["created_at"].replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError, AttributeError):
+                    pass
+            if payload.get("updated_at"):
+                try:
+                    updated_at = datetime.fromisoformat(
+                        payload["updated_at"].replace("Z", "+00:00")
+                    )
+                except (ValueError, TypeError, AttributeError):
+                    pass
+
+            # Build source_fields from remaining payload fields
+            # Exclude known fields that are in the schema
+            known_fields = {
+                "entity_id",
+                "name",
+                "textual_representation",
+                "created_at",
+                "updated_at",
+                "breadcrumbs",
+                "airweave_system_metadata",
+                "access",
+            }
+            source_fields = {k: v for k, v in payload.items() if k not in known_fields}
+
+            result = AirweaveSearchResult(
                 id=str(r.get("id", "")),
                 score=r.get("score", 0.0),
-                payload=r.get("payload", {}),
+                entity_id=payload.get("entity_id", ""),
+                name=payload.get("name", ""),
+                textual_representation=payload.get("textual_representation", ""),
+                created_at=created_at,
+                updated_at=updated_at,
+                breadcrumbs=breadcrumbs,
+                system_metadata=system_metadata,
+                access=access,
+                source_fields=source_fields,
             )
             results.append(result)
 
-        self.logger.debug(f"[QdrantSearch] Retrieved {len(results)} results")
         return results
 
     def translate_filter(self, filter: Optional[dict]) -> Optional[dict]:

@@ -23,7 +23,7 @@ class TestDestinationConfig:
         """Test default destination config values."""
         config = DestinationConfig()
         assert config.skip_qdrant is False
-        assert config.skip_vespa is False
+        assert config.skip_vespa is True  # Default: true for local (shadowing architecture)
         assert config.target_destinations is None
         assert config.exclude_destinations is None
 
@@ -185,7 +185,7 @@ class TestSyncConfigPresets:
         """Test default() preset."""
         config = SyncConfig.default()
         assert config.destinations.skip_qdrant is False
-        assert config.destinations.skip_vespa is False
+        assert config.destinations.skip_vespa is True  # Default: true for local
         assert config.handlers.enable_vector_handlers is True
 
     def test_qdrant_only_preset(self):

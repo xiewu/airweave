@@ -113,7 +113,7 @@ async def configure_s3_destination(
                 db, existing_connection.integration_credential_id, ctx=ctx
             )
             if cred:
-                cred.encrypted_data = encrypt(auth_config.model_dump())
+                cred.encrypted_credentials = encrypt(auth_config.model_dump())
                 await db.commit()
                 await db.refresh(cred)
 
@@ -299,7 +299,7 @@ async def get_s3_status(
             from airweave.core.credentials import decrypt
 
             try:
-                decrypted = decrypt(cred.encrypted_data)
+                decrypted = decrypt(cred.encrypted_credentials)
                 bucket_name = decrypted.get("bucket_name")
                 role_arn = decrypted.get("role_arn")
             except Exception:

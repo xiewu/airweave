@@ -6,9 +6,10 @@ and executed in a flexible pipeline.
 """
 
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 from uuid import UUID
 
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from airweave import crud
@@ -18,6 +19,9 @@ from airweave.schemas.search import SearchRequest, SearchResponse
 from airweave.search.factory import factory
 from airweave.search.helpers import search_helpers
 from airweave.search.orchestrator import orchestrator
+
+# Type alias for destination
+SearchDestination = Literal["qdrant", "vespa"]
 
 
 class SearchService:
@@ -39,7 +43,7 @@ class SearchService:
             db, readable_id=readable_collection_id, ctx=ctx
         )
         if not collection:
-            raise NotFoundException(detail=f"Collection '{readable_collection_id}' not found")
+            raise NotFoundException(message=f"Collection '{readable_collection_id}' not found")
 
         ctx.logger.debug("Building search context")
         search_context = await factory.build(
@@ -99,6 +103,74 @@ class SearchService:
             search_response=response,
             ctx=ctx,
             duration_ms=duration_ms,
+        )
+
+        return response
+
+    async def search_admin(
+        self,
+        request_id: str,
+        readable_collection_id: str,
+        search_request: SearchRequest,
+        db: AsyncSession,
+        ctx: ApiContext,
+        destination: SearchDestination = "qdrant",
+    ) -> SearchResponse:
+        """Admin search with destination selection (no ACL filtering by logged-in user).
+
+        Allows searching any collection regardless of organization with selectable
+        destination (Qdrant or Vespa). This is primarily for migration testing
+        and admin support operations.
+
+        Args:
+            request_id: Unique request identifier
+            readable_collection_id: Collection readable ID to search
+            search_request: Search parameters
+            db: Database session
+            ctx: API context
+            destination: Search destination ('qdrant' or 'vespa')
+
+        Returns:
+            SearchResponse with results
+        """
+        start_time = time.monotonic()
+
+        # Get collection without organization filtering
+        from airweave.models.collection import Collection
+
+        result = await db.execute(
+            sa_select(Collection).where(Collection.readable_id == readable_collection_id)
+        )
+        collection = result.scalar_one_or_none()
+
+        if not collection:
+            raise NotFoundException(message=f"Collection '{readable_collection_id}' not found")
+
+        ctx.logger.info(
+            f"Admin searching collection {readable_collection_id} "
+            f"(org: {collection.organization_id}) using destination: {destination}"
+        )
+
+        ctx.logger.debug("Building admin search context")
+        search_context = await factory.build(
+            request_id=request_id,
+            collection_id=collection.id,
+            readable_collection_id=readable_collection_id,
+            search_request=search_request,
+            stream=False,
+            ctx=ctx,
+            db=db,
+            destination_override=destination,
+            skip_organization_check=True,
+        )
+
+        ctx.logger.debug("Executing admin search")
+        response, state = await orchestrator.run(ctx, search_context)
+
+        duration_ms = (time.monotonic() - start_time) * 1000
+        ctx.logger.info(
+            f"Admin search completed ({destination}): "
+            f"{len(response.results)} results in {duration_ms:.2f}ms"
         )
 
         return response

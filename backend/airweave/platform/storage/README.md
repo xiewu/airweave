@@ -65,5 +65,5 @@ Each entity JSON contains original fields plus reconstruction metadata:
 
 ### Location
 
-- **Local**: `backend/local_storage/raw/`
+- **Local**: `local_storage/raw/` (at repo root)
 - **Kubernetes**: PVC-mounted at configured `STORAGE_PATH`

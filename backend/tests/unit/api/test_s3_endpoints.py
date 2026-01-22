@@ -275,7 +275,7 @@ class TestGetS3Status:
 
         # Mock credential with decrypted data
         mock_cred = MagicMock()
-        mock_cred.encrypted_data = b"encrypted"
+        mock_cred.encrypted_credentials = b"encrypted"
 
         with patch("airweave.api.v1.endpoints.s3.crud") as mock_crud:
             mock_crud.integration_credential.get = AsyncMock(return_value=mock_cred)

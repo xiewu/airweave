@@ -9,14 +9,14 @@
             "args": [
                 "--reload",
                 "--reload-dir",
-                "airweave",
+                "backend/airweave",
                 "--host",
                 "127.0.0.1",
                 "--port",
                 "8001",
                 "airweave.main:app"
             ],
-            "cwd": "${workspaceFolder}/backend",
+            "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "consoleName": "⚡ FastAPI Backend",
             "jinja": true,
@@ -39,7 +39,7 @@
                 "8001",
                 "airweave.main:app"
             ],
-            "cwd": "${workspaceFolder}/backend",
+            "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "consoleName": "⚡ FastAPI Backend (Stable)",
             "jinja": true,
@@ -59,7 +59,7 @@
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
-            "cwd": "${workspaceFolder}/backend",
+            "cwd": "${workspaceFolder}",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/backend",
                 "TESTING": "true"
@@ -76,7 +76,7 @@
             "console": "integratedTerminal",
             "consoleName": "🧪 Pytest",
             "justMyCode": false,
-            "cwd": "${workspaceFolder}/backend",
+            "cwd": "${workspaceFolder}",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/backend",
                 "TESTING": "true"
@@ -90,7 +90,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}/backend",
+            "cwd": "${workspaceFolder}",
             "justMyCode": true
         },
         {
@@ -101,9 +101,9 @@
             "python": "${command:python.interpreterPath}",
             "console": "integratedTerminal",
             "consoleName": "✨ Temporal Worker",
-            "cwd": "${workspaceFolder}/backend",
+            "cwd": "${workspaceFolder}",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}/backend",
+                "PYTHONPATH": "${workspaceFolder}/backend"
                 // "LOG_LEVEL": "DEBUG"
             },
             "justMyCode": false,
@@ -116,7 +116,7 @@
             "program": "${workspaceFolder}/.vscode/run_worker_reload.py",
             "console": "integratedTerminal",
             "consoleName": "✨ Temporal Worker (Hot Reload)",
-            "cwd": "${workspaceFolder}/backend",
+            "cwd": "${workspaceFolder}",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/backend",
                 "AIRWEAVE_DEBUGPY_WORKER_PORT": "7233"

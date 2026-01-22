@@ -53,6 +53,7 @@ services:
       - "8001:8001"
     volumes:
       - ../backend:/app
+      - ../local_storage:/app/local_storage
     # Enable host.docker.internal on Linux (needed for webhook e2e tests)
     extra_hosts:
       - "host.docker.internal:host-gateway"

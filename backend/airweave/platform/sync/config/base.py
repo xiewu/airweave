@@ -123,7 +123,7 @@ class SyncConfig(BaseSettings):
     @classmethod
     def vespa_only(cls) -> "SyncConfig":
         """Write to Vespa only, skip Qdrant."""
-        return cls(destinations=DestinationConfig(skip_qdrant=True))
+        return cls(destinations=DestinationConfig(skip_qdrant=True, skip_vespa=False))
 
     @classmethod
     def arf_capture_only(cls) -> "SyncConfig":

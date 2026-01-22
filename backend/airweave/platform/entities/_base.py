@@ -71,8 +71,11 @@ class AirweaveSystemMetadata(BaseModel):
     )
 
     # Set during embedding
-    vectors: Optional[List[List[float] | SparseEmbedding]] = Field(
-        None, description="Vectors for this entity."
+    dense_embedding: Optional[List[float]] = Field(
+        None, description="3072-dim dense embedding from text-embedding-3-large"
+    )
+    sparse_embedding: Optional[SparseEmbedding] = Field(
+        None, description="BM25 sparse embedding for hybrid search (Qdrant only)"
     )
 
     # Set during persistence
@@ -109,8 +112,6 @@ class BaseEntity(BaseModel):
     airweave_system_metadata: Optional[AirweaveSystemMetadata] = Field(
         None, description="System metadata for this entity."
     )
-
-    # Vespa-specific content (populated by VespaChunkEmbedProcessor)
     vespa_content: Optional[VespaContent] = Field(
         None, description="Vespa chunks and embeddings (entity-as-document model)"
     )

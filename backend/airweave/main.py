@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
                 env=env,
             )
         if settings.RUN_DB_SYNC:
-            await sync_platform_components("airweave/platform", db)
+            await sync_platform_components(db)
         await init_db(db)
 
     # Initialize cleanup schedule for stuck sync jobs (if Temporal is enabled)
