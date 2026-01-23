@@ -33,6 +33,7 @@ class SyncJobBase(BaseModel):
     error: Optional[str] = None
     access_token: Optional[str] = None
     sync_config: Optional[SyncConfig] = None
+    sync_metadata: Optional[dict] = None
 
     class Config:
         """Pydantic config for SyncJobBase."""
@@ -61,6 +62,7 @@ class SyncJobUpdate(BaseModel):
     completed_at: Optional[datetime] = None
     failed_at: Optional[datetime] = None
     error: Optional[str] = None
+    sync_metadata: Optional[dict] = None
 
 
 class SyncJobInDBBase(SyncJobBase):

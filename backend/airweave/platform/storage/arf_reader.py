@@ -124,13 +124,16 @@ class ArfReader:
             return []
 
     async def get_entity_count(self) -> int:
-        """Get count of entities in ARF storage.
+        """Get count of entities in ARF storage (optimized).
 
         Returns:
             Number of entity files
         """
-        files = await self.list_entity_files()
-        return len(files)
+        entities_dir = self._entities_dir()
+        try:
+            return await self.storage.count_files(entities_dir, pattern="*.json")
+        except Exception:
+            return 0
 
     async def iter_entity_dicts(self, batch_size: int = 50) -> AsyncGenerator[Dict[str, Any], None]:
         """Iterate over raw entity dicts from storage with batched concurrent reads.

@@ -16,9 +16,7 @@ class DestinationConfig(BaseModel):
     """Controls where entities are written."""
 
     skip_qdrant: bool = Field(False, description="Skip writing to native Qdrant")
-    skip_vespa: bool = Field(
-        True, description="Skip writing to native Vespa (default: true for local)"
-    )
+    skip_vespa: bool = Field(False, description="Skip writing to native Vespa")
     target_destinations: Optional[List[UUID]] = Field(
         None, description="If set, ONLY write to these destination UUIDs"
     )

@@ -58,22 +58,24 @@ class SourceConnectionHelpers:
     ) -> list[UUID]:
         """Get destination connection IDs based on feature flags.
 
-        By default, writes to Qdrant only. Vespa can be enabled via SyncConfig.
+        By default, writes to BOTH Qdrant and Vespa:
+        - Qdrant: Primary search destination (default for search queries)
+        - Vespa: Secondary destination (for future advanced search features)
 
         Args:
             db: Database session
             ctx: API context with organization and feature flags
 
         Returns:
-            List of destination connection IDs (Qdrant by default, adds S3 if enabled)
+            List of destination connection IDs (always includes Qdrant + Vespa, adds S3 if enabled)
         """
         from sqlalchemy import and_, select
 
         from airweave.models.connection import Connection
 
-        # Write to Qdrant only by default (Vespa skipped for simpler local setup)
-        # To enable Vespa: set SYNC_CONFIG__DESTINATIONS__SKIP_VESPA=false
-        destination_ids = [NATIVE_QDRANT_UUID]
+        # Write to both Qdrant and Vespa by default
+        # TODO: Remove Qdrant once we Vespa is fully supported
+        destination_ids = [NATIVE_QDRANT_UUID, NATIVE_VESPA_UUID]
 
         # Add S3 if feature flag enabled
         if ctx.has_feature(FeatureFlag.S3_DESTINATION):

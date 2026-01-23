@@ -237,9 +237,10 @@ class EntityTransformer:
         - AC-enabled sources: Use the actual ACL values from entity.access
         - Non-AC sources: Set is_public=True so entities are visible to everyone
         """
-        if entity.access is not None:
-            fields["access_is_public"] = entity.access.is_public
-            fields["access_viewers"] = entity.access.viewers if entity.access.viewers else []
+        access = getattr(entity, "access", None)
+        if access is not None:
+            fields["access_is_public"] = access.is_public
+            fields["access_viewers"] = access.viewers if access.viewers else []
         else:
             fields["access_is_public"] = True
             fields["access_viewers"] = []

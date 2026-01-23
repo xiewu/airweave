@@ -157,6 +157,7 @@ class SyncService:
         sync_id: UUID,
         ctx: ApiContext,
         execution_config: Optional[Dict[str, Any]] = None,
+        sync_metadata: Optional[Dict[str, Any]] = None,
     ) -> Tuple[schemas.Sync, schemas.SyncJob]:
         """Trigger a manual sync run.
 
@@ -165,6 +166,7 @@ class SyncService:
             sync_id: Sync ID to run
             ctx: API context
             execution_config: Optional execution config dict to persist in DB
+            sync_metadata: Optional metadata dict (e.g., tags) to persist in DB
 
         Returns:
             Tuple of (sync, sync_job) schemas
@@ -199,7 +201,9 @@ class SyncService:
 
         # Create sync job
         async with UnitOfWork(db) as uow:
-            sync_job = await self._create_sync_job(uow.session, sync_id, ctx, uow, execution_config)
+            sync_job = await self._create_sync_job(
+                uow.session, sync_id, ctx, uow, execution_config, sync_metadata
+            )
 
             await uow.commit()
             await uow.session.refresh(sync_job)
@@ -214,12 +218,14 @@ class SyncService:
         ctx: ApiContext,
         uow: UnitOfWork,
         execution_config: Optional[Dict[str, Any]] = None,
+        sync_metadata: Optional[Dict[str, Any]] = None,
     ) -> SyncJob:
         """Create a sync job record."""
         sync_job_in = schemas.SyncJobCreate(
             sync_id=sync_id,
             status=SyncJobStatus.PENDING,
             sync_config=execution_config.model_dump() if execution_config else None,
+            sync_metadata=sync_metadata,
         )
 
         return await crud.sync_job.create(db, obj_in=sync_job_in, ctx=ctx, uow=uow)

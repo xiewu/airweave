@@ -27,7 +27,7 @@ class TestSyncConfigBuilderBasic:
         with _clean_env():
             config = SyncConfigBuilder.build()
             assert config.destinations.skip_qdrant is False
-            assert config.destinations.skip_vespa is True  # Default: true for local
+            assert config.destinations.skip_vespa is False  # Default: false (Vespa enabled in prod)
             assert config.handlers.enable_vector_handlers is True
             assert config.cursor.skip_load is False
             assert config.behavior.replay_from_arf is False
@@ -110,7 +110,7 @@ class TestSyncConfigBuilderPartialOverrides:
                 job_overrides=SyncConfig(destinations=DestinationConfig(skip_qdrant=True))
             )
             assert config.destinations.skip_qdrant is True
-            assert config.destinations.skip_vespa is True  # Preserved default (true for local)
+            assert config.destinations.skip_vespa is False  # Preserved default (false - Vespa enabled)
 
     def test_partial_override_preserves_other_sections(self):
         """Test that overriding one section preserves other sections."""

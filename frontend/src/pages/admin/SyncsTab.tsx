@@ -21,7 +21,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Search, Copy, XCircle, Trash2, CalendarX, AlertCircle, RefreshCw } from 'lucide-react';
+import { Search, Copy, XCircle, Trash2, CalendarX, AlertCircle, RefreshCw, X } from 'lucide-react';
 import {
     Tooltip,
     TooltipContent,
@@ -54,9 +54,7 @@ interface SyncInfo {
     last_job_status?: string;
     last_job_at?: string;
     last_job_error?: string;
-    last_vespa_job_id?: string;
-    last_vespa_job_status?: string;
-    last_vespa_job_at?: string;
+    all_tags?: string[];
     created_at: string;
 }
 
@@ -80,11 +78,11 @@ interface SyncFilters {
     status: string;
     lastJobStatus: string;
     isAuthenticated: string;
-    vespaJobStatus: string;
-    hasVespaJob: string;
     ghostSyncsOnly: boolean;
     includeDestinationCounts: boolean;
     includeArfCounts: boolean;
+    tags: string;
+    excludeTags: string;
     limit: number;
 }
 
@@ -99,11 +97,11 @@ export function SyncsTab() {
         status: 'all',
         lastJobStatus: 'all',
         isAuthenticated: 'all',
-        vespaJobStatus: 'all',
-        hasVespaJob: 'all',
         ghostSyncsOnly: false,
         includeDestinationCounts: false,
         includeArfCounts: false,
+        tags: '',
+        excludeTags: '',
         limit: 100,
     });
     const [organizationMap, setOrganizationMap] = useState<OrganizationMap>({});
@@ -115,6 +113,8 @@ export function SyncsTab() {
     const [resyncingSync, setResyncingSync] = useState<{ id: string; name: string } | null>(null);
     const [selectedPreset, setSelectedPreset] = useState<SyncPreset>('default');
     const [resyncConfig, setResyncConfig] = useState<SyncConfig>(getPresetConfig('default'));
+    const [resyncTags, setResyncTags] = useState<string[]>([]);
+    const [tagInput, setTagInput] = useState<string>('');
 
     const loadSyncs = async () => {
         setIsSyncsLoading(true);
@@ -143,12 +143,6 @@ export function SyncsTab() {
             if (syncFilters.isAuthenticated !== 'all') {
                 params.append('is_authenticated', syncFilters.isAuthenticated);
             }
-            if (syncFilters.vespaJobStatus !== 'all') {
-                params.append('last_vespa_job_status', syncFilters.vespaJobStatus);
-            }
-            if (syncFilters.hasVespaJob !== 'all') {
-                params.append('has_vespa_job', syncFilters.hasVespaJob);
-            }
             if (syncFilters.ghostSyncsOnly) {
                 params.append('ghost_syncs_last_n', '5');
             }
@@ -157,6 +151,12 @@ export function SyncsTab() {
             }
             if (syncFilters.includeArfCounts) {
                 params.append('include_arf_counts', 'true');
+            }
+            if (syncFilters.tags.trim()) {
+                params.append('tags', syncFilters.tags.trim());
+            }
+            if (syncFilters.excludeTags.trim()) {
+                params.append('exclude_tags', syncFilters.excludeTags.trim());
             }
 
             const response = await apiClient.get(`/admin/syncs?${params.toString()}`);
@@ -431,14 +431,38 @@ export function SyncsTab() {
         setResyncConfig(getPresetConfig(presetId));
     };
 
+    const handleAddTag = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' && tagInput.trim()) {
+            e.preventDefault();
+            const newTag = tagInput.trim();
+            if (!resyncTags.includes(newTag)) {
+                setResyncTags([...resyncTags, newTag]);
+            }
+            setTagInput('');
+        }
+    };
+
+    const handleRemoveTag = (tagToRemove: string) => {
+        setResyncTags(resyncTags.filter(tag => tag !== tagToRemove));
+    };
+
     const handleResync = async () => {
         if (!resyncingSync) return;
 
         try {
-            // Send nested SyncConfig structure
+            // Build request body with config and optional tags
+            const requestBody: any = {
+                execution_config: resyncConfig
+            };
+
+            // Add tags if provided
+            if (resyncTags.length > 0) {
+                requestBody.tags = resyncTags;
+            }
+
             const response = await apiClient.post(
                 `/admin/resync/${resyncingSync.id}`,
-                resyncConfig
+                requestBody
             );
 
             if (!response.ok) {
@@ -450,6 +474,8 @@ export function SyncsTab() {
             toast.success(`Resync job created for "${resyncingSync.name}" (Job ID: ${result.id})`);
             setResyncDialogOpen(false);
             setResyncingSync(null);
+            setResyncTags([]); // Clear tags after successful resync
+            setTagInput('');
         } catch (error) {
             console.error('Failed to trigger resync:', error);
             toast.error(error instanceof Error ? error.message : 'Failed to trigger resync');
@@ -578,41 +604,31 @@ export function SyncsTab() {
                         </div>
                     </div>
 
-                    {/* Vespa Job Filters */}
+                    {/* Tag Filters */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
-                            <Label htmlFor="vespa-job-status-filter">Vespa Job Status</Label>
-                            <Select
-                                value={syncFilters.vespaJobStatus}
-                                onValueChange={(value) => setSyncFilters({ ...syncFilters, vespaJobStatus: value })}
-                            >
-                                <SelectTrigger id="vespa-job-status-filter">
-                                    <SelectValue placeholder="All" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All</SelectItem>
-                                    <SelectItem value="completed">Completed</SelectItem>
-                                    <SelectItem value="failed">Failed</SelectItem>
-                                    <SelectItem value="running">Running</SelectItem>
-                                    <SelectItem value="pending">Pending</SelectItem>
-                                </SelectContent>
-                            </Select>
+                            <Label htmlFor="tags-filter">Include Tags</Label>
+                            <Input
+                                id="tags-filter"
+                                placeholder="Comma-separated (e.g., vespa-backfill-01-22-2026)"
+                                value={syncFilters.tags}
+                                onChange={(e) => setSyncFilters({ ...syncFilters, tags: e.target.value })}
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                                Show only syncs with these tags (matches ANY tag)
+                            </p>
                         </div>
                         <div>
-                            <Label htmlFor="has-vespa-job-filter">Vespa Job Existence</Label>
-                            <Select
-                                value={syncFilters.hasVespaJob}
-                                onValueChange={(value) => setSyncFilters({ ...syncFilters, hasVespaJob: value })}
-                            >
-                                <SelectTrigger id="has-vespa-job-filter">
-                                    <SelectValue placeholder="All" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All</SelectItem>
-                                    <SelectItem value="true">Has Vespa Job</SelectItem>
-                                    <SelectItem value="false">Pending Backfill</SelectItem>
-                                </SelectContent>
-                            </Select>
+                            <Label htmlFor="exclude-tags-filter">Exclude Tags</Label>
+                            <Input
+                                id="exclude-tags-filter"
+                                placeholder="Comma-separated (e.g., vespa-backfill-01-22-2026)"
+                                value={syncFilters.excludeTags}
+                                onChange={(e) => setSyncFilters({ ...syncFilters, excludeTags: e.target.value })}
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                                Hide syncs with these tags (useful for filtering out already-backfilled syncs)
+                            </p>
                         </div>
                     </div>
 
@@ -715,19 +731,6 @@ export function SyncsTab() {
                     <Card>
                         <CardHeader className="pb-2 pt-3">
                             <CardTitle className="text-xs font-medium text-muted-foreground">
-                                Vespa Backfill
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="pb-3">
-                            <div className="text-2xl font-bold text-purple-500">
-                                {syncs.filter(s => !s.last_vespa_job_id).length}
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    <Card>
-                        <CardHeader className="pb-2 pt-3">
-                            <CardTitle className="text-xs font-medium text-muted-foreground">
                                 Total Entities
                             </CardTitle>
                         </CardHeader>
@@ -818,7 +821,7 @@ export function SyncsTab() {
                                         <TableHead>Auth</TableHead>
                                         <TableHead className="text-right">Entity Counts</TableHead>
                                         <TableHead>Last Job</TableHead>
-                                        <TableHead>Vespa Job</TableHead>
+                                        <TableHead>Tags</TableHead>
                                         <TableHead>Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -965,32 +968,20 @@ export function SyncsTab() {
                                                     )}
                                                 </TableCell>
                                                 <TableCell>
-                                                    {sync.last_vespa_job_id ? (
-                                                        <div className="flex flex-col gap-0.5">
-                                                            <Badge
-                                                                variant="outline"
-                                                                className={
-                                                                    sync.last_vespa_job_status === 'completed'
-                                                                        ? 'bg-green-500/10 text-green-400 border-green-500/30'
-                                                                        : sync.last_vespa_job_status === 'failed'
-                                                                            ? 'bg-red-500/10 text-red-400 border-red-500/30'
-                                                                            : sync.last_vespa_job_status === 'running'
-                                                                                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
-                                                                                : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                                                }
-                                                            >
-                                                                {sync.last_vespa_job_status || 'unknown'}
-                                                            </Badge>
-                                                            {sync.last_vespa_job_at && (
-                                                                <span className="text-xs text-muted-foreground">
-                                                                    {new Date(sync.last_vespa_job_at).toLocaleString()}
-                                                                </span>
-                                                            )}
+                                                    {sync.all_tags && sync.all_tags.length > 0 ? (
+                                                        <div className="flex flex-wrap gap-1 max-w-[200px]">
+                                                            {sync.all_tags.map((tag) => (
+                                                                <Badge
+                                                                    key={tag}
+                                                                    variant="secondary"
+                                                                    className="text-xs px-1.5 py-0.5 bg-blue-500/10 text-blue-400 border-blue-500/30"
+                                                                >
+                                                                    {tag}
+                                                                </Badge>
+                                                            ))}
                                                         </div>
                                                     ) : (
-                                                        <Badge variant="outline" className="bg-purple-500/10 text-purple-400 border-purple-500/30">
-                                                            Pending Backfill
-                                                        </Badge>
+                                                        <span className="text-xs text-muted-foreground">-</span>
                                                     )}
                                                 </TableCell>
                                                 <TableCell>
@@ -1277,6 +1268,47 @@ export function SyncsTab() {
                                     </Label>
                                 </div>
                             </div>
+                        </div>
+
+                        {/* Tags Input */}
+                        <div className="space-y-3">
+                            <Label htmlFor="resync-tags" className="text-sm font-semibold">
+                                Tags (Optional)
+                            </Label>
+                            <div className="space-y-2">
+                                {/* Tag badges */}
+                                {resyncTags.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {resyncTags.map((tag) => (
+                                            <Badge
+                                                key={tag}
+                                                variant="secondary"
+                                                className="pl-2 pr-1 py-1 gap-1 bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20"
+                                            >
+                                                <span>{tag}</span>
+                                                <button
+                                                    onClick={() => handleRemoveTag(tag)}
+                                                    className="ml-1 rounded-full hover:bg-blue-500/30 p-0.5"
+                                                    type="button"
+                                                >
+                                                    <X className="h-3 w-3" />
+                                                </button>
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                )}
+                                {/* Tag input */}
+                                <Input
+                                    id="resync-tags"
+                                    placeholder="Type a tag and press Enter (e.g., vespa-backfill-01-22-2026)"
+                                    value={tagInput}
+                                    onChange={(e) => setTagInput(e.target.value)}
+                                    onKeyDown={handleAddTag}
+                                />
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                Press <kbd className="px-1.5 py-0.5 text-xs bg-muted border rounded">Enter</kbd> to add each tag. Tags help filter and organize sync jobs for tracking backfills or manual operations.
+                            </p>
                         </div>
 
                         {/* Info Box */}

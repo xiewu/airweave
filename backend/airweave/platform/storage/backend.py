@@ -12,6 +12,7 @@ Usage:
 """
 
 import asyncio
+import fnmatch
 import json
 import os
 import shutil
@@ -132,6 +133,21 @@ class StorageBackend(ABC):
 
         Returns:
             List of directory paths
+        """
+        pass
+
+    @abstractmethod
+    async def count_files(self, prefix: str = "", pattern: str = "*") -> int:
+        """Count files under a prefix without building a full list.
+
+        Much faster than len(await list_files()) for large directories.
+
+        Args:
+            prefix: Path prefix to filter by
+            pattern: File pattern to match (e.g., "*.json")
+
+        Returns:
+            Number of matching files
         """
         pass
 
@@ -277,6 +293,23 @@ class FilesystemBackend(StorageBackend):
             return sorted(dirs)
 
         return await asyncio.to_thread(_list_dirs_sync)
+
+    async def count_files(self, prefix: str = "", pattern: str = "*") -> int:
+        """Count files under prefix without building full list (fast)."""
+
+        def _count_files_sync():
+            base = self._resolve(prefix) if prefix else self.base_path
+            if not base.exists():
+                return 0
+
+            count = 0
+            for item in base.rglob(pattern):
+                if item.is_file():
+                    count += 1
+
+            return count
+
+        return await asyncio.to_thread(_count_files_sync)
 
 
 class AzureBlobBackend(StorageBackend):
@@ -488,3 +521,21 @@ class AzureBlobBackend(StorageBackend):
             logger.error(f"Failed to list dirs in {prefix}: {e}")
 
         return sorted(dirs)
+
+    async def count_files(self, prefix: str = "", pattern: str = "*") -> int:
+        """Count blobs under prefix without building full list (fast)."""
+        full_prefix = self._resolve(prefix)
+        if prefix and not full_prefix.endswith("/"):
+            full_prefix += "/"
+
+        count = 0
+        try:
+            container_client = await self._get_container_client()
+            async for blob in container_client.list_blobs(name_starts_with=full_prefix):
+                rel_path = blob.name[len(full_prefix) :]
+                if pattern == "*" or fnmatch.fnmatch(rel_path, pattern):
+                    count += 1
+        except Exception as e:
+            logger.error(f"Failed to count files in {prefix}: {e}")
+
+        return count

@@ -995,8 +995,16 @@ async def resync_with_execution_config(
             },
         ],
     ),
+    tags: Optional[List[str]] = Body(
+        None,
+        description="Optional tags for filtering and organizing sync jobs (e.g., ['vespa-backfill-01-22-2026', 'manual'])",
+        examples=[
+            ["vespa-backfill-01-22-2026", "manual"],
+            ["production"],
+        ],
+    ),
 ) -> schemas.SyncJob:
-    """Admin-only: Trigger a sync with custom execution config via Temporal.
+    """Admin-only: Trigger a sync with custom execution config and optional tags via Temporal.
 
     This endpoint allows admins to trigger syncs with custom execution configurations
     for advanced use cases like ARF-only capture, destination-specific replays, or dry runs.
@@ -1012,11 +1020,16 @@ async def resync_with_execution_config(
         - cursor: skip_load, skip_updates
         - behavior: skip_hash_comparison, replay_from_arf
 
+    **Tags**: Optional list of strings for filtering/organizing jobs:
+        - Example: ["vespa-backfill-01-22-2026", "manual"]
+        - Stored in sync_metadata.tags for filtering in admin dashboard
+
     Args:
         db: Database session
         sync_id: ID of the sync to trigger
         ctx: API context
         execution_config: Optional nested SyncConfig
+        tags: Optional list of tags for filtering
 
     Returns:
         The created sync job
@@ -1118,12 +1131,20 @@ async def resync_with_execution_config(
         "destination_connection_ids": destination_connection_ids,
     }
     sync_schema = schemas.Sync.model_validate(sync_dict)
+
+    # Build sync_metadata with tags if provided
+    sync_metadata = None
+    if tags:
+        sync_metadata = {"tags": tags}
+        ctx.logger.info(f"Admin resync job will be tagged with: {tags}")
+
     async with UnitOfWork(db) as uow:
         sync_job_obj = SyncJob(
             sync_id=sync_id,
             organization_id=sync_obj.organization_id,
             status=SyncJobStatus.PENDING,
             sync_config=execution_config.model_dump() if execution_config else None,
+            sync_metadata=sync_metadata,
         )
         uow.session.add(sync_job_obj)
         await uow.commit()
@@ -1197,14 +1218,10 @@ class AdminSyncInfo(schemas.Sync):
     last_job_status: Optional[str] = None
     last_job_at: Optional[datetime] = None
     last_job_error: Optional[str] = None
+    all_tags: Optional[List[str]] = None
     source_short_name: Optional[str] = None
     source_is_authenticated: Optional[bool] = None
     readable_collection_id: Optional[str] = None
-
-    # Last job that wrote to Vespa (skip_vespa != true)
-    last_vespa_job_id: Optional[UUID] = None
-    last_vespa_job_status: Optional[str] = None
-    last_vespa_job_at: Optional[datetime] = None
 
     class Config:
         """Pydantic config."""
@@ -1479,13 +1496,6 @@ async def admin_list_all_syncs(
         None,
         description="Filter by last job status (completed, failed, running, pending, cancelled)",
     ),
-    last_vespa_job_status: Optional[str] = Query(
-        None, description="Filter by last Vespa job status (completed, failed, running, pending)"
-    ),
-    has_vespa_job: Optional[bool] = Query(
-        None,
-        description="Filter by Vespa job existence (false=pending backfill, true=has job)",
-    ),
     ghost_syncs_last_n: Optional[int] = Query(
         None,
         ge=1,
@@ -1500,6 +1510,14 @@ async def admin_list_all_syncs(
         False,
         description="Include ARF entity counts (slower, queries ARF storage for each sync)",
     ),
+    tags: Optional[str] = Query(
+        None,
+        description="Comma-separated list of tags to filter by (matches jobs with ANY of the tags)",
+    ),
+    exclude_tags: Optional[str] = Query(
+        None,
+        description="Comma-separated list of tags to exclude (hides syncs with jobs having ANY of these tags)",
+    ),
 ) -> List[AdminSyncInfo]:
     """Admin-only: List all syncs across organizations with entity counts.
 
@@ -1508,31 +1526,15 @@ async def admin_list_all_syncs(
     **Note**: Orphaned syncs (deleted source connections) are excluded by default.
     Set `has_source_connection=false` to see only orphaned syncs.
 
-    **All filters are optional** except `has_source_connection` which defaults to true.
-
     **Entity Counts**:
         - total_entity_count: Count from Postgres (EntityCount table) - always included
         - total_arf_entity_count: Count from ARF storage (None unless include_arf_counts=true)
         - total_qdrant_entity_count: Count from Qdrant (None unless include_destination_counts=true)
         - total_vespa_entity_count: Count from Vespa (None unless include_destination_counts=true)
 
-    Filters:
-        - sync_ids: Comma-separated list of sync UUIDs (e.g., 'uuid1,uuid2,uuid3')
-        - organization_id: Filter by organization UUID
-        - collection_id: Filter by collection readable ID (exact match)
-        - source_type: Filter by source short name (e.g., 'linear', 'github')
-        - has_source_connection: Include syncs with source connections (default: true)
-        - is_authenticated: Filter by authentication status (true=active, false=needs reauth)
-        - status: Filter by sync status (active, inactive, error)
-        - last_job_status: Filter by last job status (any job type)
-        - last_vespa_job_status: Filter by last Vespa job status for migration tracking
-        - has_vespa_job: Filter by Vespa job existence (false=pending backfill)
-        - exclude_failed_last_n: Exclude syncs where last N non-running jobs all failed
-        - include_destination_counts: Include Qdrant/Vespa counts (slower, queries destinations)
-
     **Performance Note**: Setting `include_destination_counts=true` or `include_arf_counts=true`
-    queries external storage for each sync, which is significantly slower. Both default to false.
-    Recommended only for small result sets (<20 syncs).
+    queries external storage for each sync. Optimized with connection pooling but still slower.
+    Uses approximate counts for better performance. Recommended for result sets <50 syncs.
 
     Args:
         db: Database session
@@ -1547,9 +1549,9 @@ async def admin_list_all_syncs(
         is_authenticated: Optional filter by authentication status
         status: Optional filter by sync status
         last_job_status: Optional filter by last job status
-        last_vespa_job_status: Optional filter by Vespa job status
-        has_vespa_job: Optional filter by Vespa job existence
-        exclude_failed_last_n: Optional exclude syncs with N consecutive failures
+        ghost_syncs_last_n: Optional filter to syncs with N consecutive failures
+        tags: Optional comma-separated list of tags to filter by
+        exclude_tags: Optional comma-separated list of tags to exclude
         include_destination_counts: Whether to fetch Qdrant/Vespa counts (slower)
         include_arf_counts: Whether to fetch ARF entity counts (slower)
 
@@ -1557,25 +1559,11 @@ async def admin_list_all_syncs(
         List of syncs with extended information including entity counts
 
     Raises:
-        HTTPException: If not admin
+        HTTPException: If not admin or invalid parameters
     """
-    from sqlalchemy import func
-    from sqlalchemy import select as sa_select
-
-    from airweave.core.shared_models import SyncStatus
-    from airweave.models.connection import Connection
-    from airweave.models.entity_count import EntityCount
-    from airweave.models.source_connection import SourceConnection
-    from airweave.models.sync import Sync
-    from airweave.models.sync_connection import SyncConnection
-    from airweave.models.sync_job import SyncJob
-
-    import time
+    from airweave.core.admin_sync_service import admin_sync_service
 
     _require_admin_permission(ctx, FeatureFlagEnum.API_KEY_ADMIN_SYNC)
-
-    request_start = time.monotonic()
-    timings = {}
 
     # Parse sync_ids if provided
     parsed_sync_ids: Optional[List[UUID]] = None
@@ -1588,647 +1576,53 @@ async def admin_list_all_syncs(
                 detail=f"Invalid sync_ids format. Must be comma-separated UUIDs: {e}",
             )
 
-    # Build base query for syncs
-    query = sa_select(Sync)
+    # Delegate to service layer
+    sync_data_list, timings = await admin_sync_service.list_syncs_with_metadata(
+        db=db,
+        ctx=ctx,
+        skip=skip,
+        limit=limit,
+        sync_ids=parsed_sync_ids,
+        organization_id=organization_id,
+        collection_id=collection_id,
+        source_type=source_type,
+        has_source_connection=has_source_connection,
+        is_authenticated=is_authenticated,
+        status=status,
+        last_job_status=last_job_status,
+        ghost_syncs_last_n=ghost_syncs_last_n,
+        tags=tags,
+        exclude_tags=exclude_tags,
+        include_destination_counts=include_destination_counts,
+        include_arf_counts=include_arf_counts,
+    )
 
-    # Apply SQL-level filters
-    if parsed_sync_ids:
-        query = query.where(Sync.id.in_(parsed_sync_ids))
-
-    if organization_id:
-        query = query.where(Sync.organization_id == organization_id)
-
-    if status is not None:
-        # Validate status value
-        try:
-            status_enum = SyncStatus(status.lower())
-            query = query.where(Sync.status == status_enum)
-        except ValueError:
-            # Invalid status value, return empty result
-            return []
-
-    # Source connection filters using subqueries to avoid JOIN duplication
-    if has_source_connection:
-        # Only syncs that have a source connection
-        query = query.where(
-            Sync.id.in_(
-                sa_select(SourceConnection.sync_id).where(SourceConnection.sync_id.isnot(None))
-            )
-        )
-    else:
-        # Only orphaned syncs (no source connection)
-        query = query.where(
-            Sync.id.notin_(
-                sa_select(SourceConnection.sync_id).where(SourceConnection.sync_id.isnot(None))
-            )
-        )
-
-    if is_authenticated is not None:
-        query = query.where(
-            Sync.id.in_(
-                sa_select(SourceConnection.sync_id).where(
-                    SourceConnection.is_authenticated == is_authenticated
-                )
-            )
-        )
-
-    if collection_id is not None:
-        query = query.where(
-            Sync.id.in_(
-                sa_select(SourceConnection.sync_id).where(
-                    SourceConnection.readable_collection_id == collection_id
-                )
-            )
-        )
-
-    if source_type is not None:
-        query = query.where(
-            Sync.id.in_(
-                sa_select(SourceConnection.sync_id).where(
-                    SourceConnection.short_name == source_type
-                )
-            )
-        )
-
-    # Apply last job status filter at SQL level
-    if last_job_status is not None:
-        from airweave.core.shared_models import SyncJobStatus
-
-        try:
-            status_enum = SyncJobStatus(last_job_status.lower())
-
-            # Subquery to get most recent job per sync
-            latest_job_subq = sa_select(
-                SyncJob.sync_id,
-                SyncJob.status,
-                func.row_number()
-                .over(partition_by=SyncJob.sync_id, order_by=SyncJob.created_at.desc())
-                .label("rn"),
-            ).subquery()
-
-            # Filter to syncs where most recent job has the requested status
-            query = query.where(
-                Sync.id.in_(
-                    sa_select(latest_job_subq.c.sync_id).where(
-                        latest_job_subq.c.rn == 1,
-                        latest_job_subq.c.status == status_enum,
-                    )
-                )
-            )
-        except ValueError:
-            # Invalid status value, return empty result
-            return []
-
-    # Apply ghost sync filter at SQL level if requested
-    if ghost_syncs_last_n is not None and ghost_syncs_last_n > 0:
-        from airweave.core.shared_models import SyncJobStatus
-
-        # Subquery to get last N jobs per sync (excluding running/pending)
-        jobs_subq = (
-            sa_select(
-                SyncJob.sync_id,
-                SyncJob.status,
-                func.row_number()
-                .over(partition_by=SyncJob.sync_id, order_by=SyncJob.created_at.desc())
-                .label("rn"),
-            )
-            .where(
-                SyncJob.status.notin_([SyncJobStatus.RUNNING.value, SyncJobStatus.PENDING.value])
-            )
-            .subquery()
-        )
-
-        # Get syncs where all last N jobs failed
-        failed_syncs_subq = (
-            sa_select(jobs_subq.c.sync_id)
-            .where(jobs_subq.c.rn <= ghost_syncs_last_n)
-            .group_by(jobs_subq.c.sync_id)
-            .having(
-                func.count().filter(jobs_subq.c.status == SyncJobStatus.FAILED.value)
-                == func.count()
-            )
-            .having(func.count() >= ghost_syncs_last_n)
-            .subquery()
-        )
-
-        query = query.where(Sync.id.in_(sa_select(failed_syncs_subq.c.sync_id)))
-
-    # Apply Vespa job filters at SQL level (must happen before limit/offset)
-    if last_vespa_job_status is not None or has_vespa_job is not None:
-        # Build subquery for Vespa jobs (ARF -> Vespa replays)
-        vespa_jobs_subq = (
-            sa_select(
-                SyncJob.sync_id,
-                SyncJob.status,
-                func.row_number()
-                .over(partition_by=SyncJob.sync_id, order_by=SyncJob.created_at.desc())
-                .label("rn"),
-            )
-            .where(
-                SyncJob.sync_config.isnot(None),
-                SyncJob.sync_config["behavior"]["replay_from_arf"].astext == "true",
-                or_(
-                    SyncJob.sync_config["destinations"]["skip_vespa"].astext != "true",
-                    SyncJob.sync_config["destinations"]["skip_vespa"].is_(None),
-                ),
-            )
-            .subquery()
-        )
-
-        # Get most recent Vespa job per sync
-        latest_vespa_jobs = (
-            sa_select(vespa_jobs_subq.c.sync_id, vespa_jobs_subq.c.status)
-            .where(vespa_jobs_subq.c.rn == 1)
-            .subquery()
-        )
-
-        if has_vespa_job is not None:
-            if has_vespa_job:
-                # Only syncs with a Vespa job
-                query = query.where(Sync.id.in_(sa_select(latest_vespa_jobs.c.sync_id)))
-            else:
-                # Only syncs without a Vespa job (pending backfill)
-                query = query.where(Sync.id.notin_(sa_select(latest_vespa_jobs.c.sync_id)))
-
-        if last_vespa_job_status is not None:
-            # Filter by specific Vespa job status
-            from airweave.core.shared_models import SyncJobStatus
-
-            try:
-                status_enum = SyncJobStatus(last_vespa_job_status.lower())
-                query = query.where(
-                    Sync.id.in_(
-                        sa_select(latest_vespa_jobs.c.sync_id).where(
-                            latest_vespa_jobs.c.status == status_enum
-                        )
-                    )
-                )
-            except ValueError:
-                # Invalid status value, return empty result
-                return []
-
-    query = query.order_by(Sync.created_at.desc()).offset(skip).limit(limit)
-
-    query_start = time.monotonic()
-    result = await db.execute(query)
-    syncs = list(result.scalars().all())
-    timings["main_query"] = (time.monotonic() - query_start) * 1000
-
-    if not syncs:
+    if not sync_data_list:
         ctx.logger.info("Admin syncs query returned 0 results")
         return []
 
-    sync_ids = [s.id for s in syncs]
+    # Convert to Pydantic models
+    admin_syncs = [AdminSyncInfo.model_validate(sync_dict) for sync_dict in sync_data_list]
 
-    # Fetch entity counts in bulk
-    entity_start = time.monotonic()
-    entity_count_query = (
-        sa_select(EntityCount.sync_id, func.sum(EntityCount.count).label("total_count"))
-        .where(EntityCount.sync_id.in_(sync_ids))
-        .group_by(EntityCount.sync_id)
-    )
-    entity_count_result = await db.execute(entity_count_query)
-    entity_count_map = {row.sync_id: row.total_count or 0 for row in entity_count_result}
-    timings["entity_counts"] = (time.monotonic() - entity_start) * 1000
-
-    # Fetch ARF entity counts if requested (slower, queries ARF storage)
-    if include_arf_counts:
-        import asyncio
-
-        from airweave.platform.sync.arf.service import ArfService
-
-        arf_start = time.monotonic()
-        arf_service = ArfService()
-
-        # Parallelize ARF counts for all syncs
-        async def get_arf_count_safe(sync_id):
-            try:
-                return await arf_service.get_entity_count(str(sync_id))
-            except Exception:
-                return None
-
-        arf_count_tasks = [get_arf_count_safe(sync.id) for sync in syncs]
-        arf_counts = await asyncio.gather(*arf_count_tasks)
-        arf_count_map = {sync.id: count for sync, count in zip(syncs, arf_counts)}
-        timings["arf_counts"] = (time.monotonic() - arf_start) * 1000
-    else:
-        arf_count_map = {s.id: None for s in syncs}
-        timings["arf_counts"] = 0
-
-    # Fetch last job info in bulk (including error message)
-    last_job_start = time.monotonic()
-    last_job_subq = (
-        sa_select(
-            SyncJob.sync_id,
-            SyncJob.status,
-            SyncJob.completed_at,
-            SyncJob.error,
-            func.row_number()
-            .over(partition_by=SyncJob.sync_id, order_by=SyncJob.created_at.desc())
-            .label("rn"),
-        )
-        .where(SyncJob.sync_id.in_(sync_ids))
-        .subquery()
-    )
-    last_job_query = sa_select(last_job_subq).where(last_job_subq.c.rn == 1)
-    last_job_result = await db.execute(last_job_query)
-    last_job_map = {
-        row.sync_id: {
-            "status": row.status,
-            "completed_at": row.completed_at,
-            "error": row.error,
-        }
-        for row in last_job_result
-    }
-    timings["last_job_info"] = (time.monotonic() - last_job_start) * 1000
-
-    # Fetch source connections info in bulk with collection IDs
-    from airweave.models.collection import Collection
-
-    source_conn_start = time.monotonic()
-    source_conn_query = (
-        sa_select(
-            SourceConnection.sync_id,
-            SourceConnection.short_name,
-            SourceConnection.readable_collection_id,
-            SourceConnection.is_authenticated,
-            Collection.id.label("collection_id"),
-        )
-        .outerjoin(Collection, SourceConnection.readable_collection_id == Collection.readable_id)
-        .where(SourceConnection.sync_id.in_(sync_ids))
-    )
-    source_conn_result = await db.execute(source_conn_query)
-    source_conn_map = {
-        row.sync_id: {
-            "short_name": row.short_name,
-            "readable_collection_id": row.readable_collection_id,
-            "is_authenticated": row.is_authenticated,
-            "collection_id": row.collection_id,
-        }
-        for row in source_conn_result
-    }
-    timings["source_connections"] = (time.monotonic() - source_conn_start) * 1000
-
-    # Fetch Qdrant and Vespa counts if requested (slower, queries destinations)
-    if include_destination_counts:
-        dest_start = time.monotonic()
-        qdrant_count_map, vespa_count_map = await _fetch_destination_counts(
-            syncs, source_conn_map, ctx
-        )
-        timings["destination_counts"] = (time.monotonic() - dest_start) * 1000
-    else:
-        qdrant_count_map = {s.id: None for s in syncs}
-        vespa_count_map = {s.id: None for s in syncs}
-        timings["destination_counts"] = 0
-
-    # Fetch sync connections to enrich with connection IDs
-    sync_conn_start = time.monotonic()
-    sync_conn_query = (
-        sa_select(SyncConnection, Connection)
-        .join(Connection, SyncConnection.connection_id == Connection.id)
-        .where(SyncConnection.sync_id.in_(sync_ids))
-    )
-    sync_conn_result = await db.execute(sync_conn_query)
-    sync_connections = {}
-    for sync_conn, connection in sync_conn_result:
-        sync_id = sync_conn.sync_id
-        if sync_id not in sync_connections:
-            sync_connections[sync_id] = {"source": None, "destinations": []}
-        if connection.integration_type.value == "source":
-            sync_connections[sync_id]["source"] = connection.id
-        elif connection.integration_type.value == "destination":
-            sync_connections[sync_id]["destinations"].append(connection.id)
-    timings["sync_connections"] = (time.monotonic() - sync_conn_start) * 1000
-
-    # Fetch last ARF -> Vespa replay job info in bulk
-    # An ARF -> Vespa replay job has:
-    #   - replay_from_arf=true (read from ARF storage)
-    #   - skip_vespa is NOT true (writes to Vespa)
-    vespa_job_start = time.monotonic()
-    arf_to_vespa_job_query = (
-        sa_select(
-            SyncJob.id,
-            SyncJob.sync_id,
-            SyncJob.status,
-            SyncJob.created_at,
-            SyncJob.completed_at,
-            SyncJob.sync_config,
-        )
-        .where(
-            SyncJob.sync_id.in_(sync_ids),
-            SyncJob.sync_config.isnot(None),
-            # Must be replay from ARF
-            SyncJob.sync_config["behavior"]["replay_from_arf"].astext == "true",
-            # Must NOT skip Vespa (skip_vespa is absent or false)
-            or_(
-                SyncJob.sync_config["destinations"]["skip_vespa"].astext != "true",
-                SyncJob.sync_config["destinations"]["skip_vespa"].is_(None),
-            ),
-        )
-        .order_by(SyncJob.sync_id, SyncJob.created_at.desc())
-    )
-    vespa_job_result = await db.execute(arf_to_vespa_job_query)
-    vespa_job_rows = list(vespa_job_result)
-
-    # Build map of sync_id -> most recent Vespa job (first per sync_id due to ordering)
-    vespa_job_map = {}
-    for row in vespa_job_rows:
-        if row.sync_id not in vespa_job_map:
-            vespa_job_map[row.sync_id] = {
-                "id": row.id,
-                "status": row.status,
-                "created_at": row.created_at,
-                "completed_at": row.completed_at,
-                "config": row.sync_config,
-            }
-    timings["vespa_job_info"] = (time.monotonic() - vespa_job_start) * 1000
-
-    # Build response using helper function
-    build_start = time.monotonic()
-    admin_syncs = _build_admin_sync_info_list(
-        syncs=syncs,
-        sync_connections=sync_connections,
-        source_conn_map=source_conn_map,
-        last_job_map=last_job_map,
-        vespa_job_map=vespa_job_map,
-        entity_count_map=entity_count_map,
-        arf_count_map=arf_count_map,
-        qdrant_count_map=qdrant_count_map,
-        vespa_count_map=vespa_count_map,
-    )
-    timings["build_response"] = (time.monotonic() - build_start) * 1000
-    timings["total"] = (time.monotonic() - request_start) * 1000
-
+    # Log performance metrics
     ctx.logger.info(
-        f"Admin listed {len(admin_syncs)} syncs in {timings['total']:.1f}ms "
-        f"(query={timings['main_query']:.1f}ms, "
-        f"entity_counts={timings['entity_counts']:.1f}ms, "
-        f"arf_counts={timings['arf_counts']:.1f}ms, "
-        f"last_job={timings['last_job_info']:.1f}ms, "
-        f"source_conn={timings['source_connections']:.1f}ms, "
-        f"dest_counts={timings['destination_counts']:.1f}ms, "
-        f"sync_conn={timings['sync_connections']:.1f}ms, "
-        f"vespa_job={timings['vespa_job_info']:.1f}ms, "
-        f"build={timings['build_response']:.1f}ms) | "
-        f"filters: sync_ids={len(parsed_sync_ids) if parsed_sync_ids else 0}, "
-        f"org={organization_id}, collection={collection_id}, "
-        f"source={source_type}, status={status}, "
-        f"last_job_status={last_job_status}, "
-        f"has_source={has_source_connection}, "
-        f"is_authenticated={is_authenticated}, "
-        f"vespa_status={last_vespa_job_status}, "
-        f"has_vespa_job={has_vespa_job}, "
-        f"ghost_syncs_n={ghost_syncs_last_n}, "
-        f"include_arf_counts={include_arf_counts}, "
-        f"include_destination_counts={include_destination_counts}"
+        f"Admin listed {len(admin_syncs)} syncs in {timings['total']:.1f}ms | "
+        f"Breakdown: query={timings.get('main_query', 0):.1f}ms, "
+        f"entity_counts={timings.get('entity_counts', 0):.1f}ms, "
+        f"arf_counts={timings.get('arf_counts', 0):.1f}ms, "
+        f"last_job={timings.get('last_job_info', 0):.1f}ms, "
+        f"source_conn={timings.get('source_connections', 0):.1f}ms, "
+        f"dest_qdrant={timings.get('destination_counts_qdrant', 0):.1f}ms, "
+        f"dest_vespa={timings.get('destination_counts_vespa', 0):.1f}ms, "
+        f"sync_conn={timings.get('sync_connections', 0):.1f}ms, "
+        f"build={timings.get('build_response', 0):.1f}ms | "
+        f"Filters: sync_ids={len(parsed_sync_ids) if parsed_sync_ids else 0}, "
+        f"org={organization_id}, collection={collection_id}, source={source_type}, "
+        f"status={status}, last_job_status={last_job_status}, "
+        f"has_source={has_source_connection}, is_authenticated={is_authenticated}, "
+        f"tags={tags}, exclude_tags={exclude_tags}, ghost_syncs_n={ghost_syncs_last_n}, "
+        f"include_arf={include_arf_counts}, include_dest={include_destination_counts}"
     )
-
-    return admin_syncs
-
-
-async def _fetch_destination_counts(
-    syncs: list, source_conn_map: dict, ctx: ApiContext
-) -> tuple[dict, dict]:
-    """Fetch document counts from Qdrant and Vespa for given syncs.
-
-    This is expensive as it queries each destination. Use sparingly.
-
-    Args:
-        syncs: List of Sync objects
-        source_conn_map: Map of sync_id to source connection info (includes collection_id)
-        ctx: API context
-
-    Returns:
-        Tuple of (qdrant_count_map, vespa_count_map)
-    """
-    import asyncio
-    from uuid import UUID
-
-    from airweave.core.config import settings
-    from airweave.platform.destinations.qdrant import QdrantDestination
-    from airweave.platform.destinations.vespa import VespaDestination
-
-    qdrant_count_map = {}
-    vespa_count_map = {}
-
-    # Limit concurrent queries per destination to avoid overwhelming them
-    MAX_CONCURRENT_COUNTS = 20
-
-    # Group syncs by collection_id for efficiency
-    syncs_by_collection = {}
-    for sync in syncs:
-        source_info = source_conn_map.get(sync.id, {})
-        coll_id = source_info.get("collection_id")
-        if not coll_id:
-            # No collection for this sync, skip
-            qdrant_count_map[sync.id] = None
-            vespa_count_map[sync.id] = None
-            continue
-
-        if coll_id not in syncs_by_collection:
-            syncs_by_collection[coll_id] = []
-        syncs_by_collection[coll_id].append(sync)
-
-    # Process all collections in parallel
-    async def process_collection(collection_id, collection_syncs):
-        """Process Qdrant and Vespa counts for a collection in parallel."""
-        qdrant_results = {}
-        vespa_results = {}
-
-        # Define Qdrant counting function
-        async def count_qdrant():
-            try:
-                qdrant = await QdrantDestination.create(
-                    collection_id=collection_id,
-                    organization_id=collection_syncs[0].organization_id,
-                    logger=ctx.logger,
-                )
-
-                # Semaphore to limit concurrent queries
-                semaphore = asyncio.Semaphore(MAX_CONCURRENT_COUNTS)
-
-                # Parallelize all sync counts for this collection (with limit)
-                async def count_qdrant_sync(sync):
-                    async with semaphore:
-                        try:
-                            from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-                            scroll_filter = Filter(
-                                must=[
-                                    FieldCondition(
-                                        key="airweave_system_metadata.sync_id",
-                                        match=MatchValue(value=str(sync.id)),
-                                    )
-                                ]
-                            )
-
-                            count_result = await qdrant.client.count(
-                                collection_name=qdrant.collection_name,
-                                count_filter=scroll_filter,
-                                exact=True,
-                            )
-                            return sync.id, count_result.count
-                        except Exception as e:
-                            ctx.logger.warning(
-                                f"Failed to count Qdrant docs for sync {sync.id}: {e}"
-                            )
-                            return sync.id, None
-
-                # Run all Qdrant counts in parallel (limited to MAX_CONCURRENT_COUNTS)
-                results = await asyncio.gather(
-                    *[count_qdrant_sync(sync) for sync in collection_syncs]
-                )
-                return {sync_id: count for sync_id, count in results}
-
-            except Exception as e:
-                ctx.logger.warning(
-                    f"Failed to create Qdrant destination for collection {collection_id}: {e}"
-                )
-                return {sync.id: None for sync in collection_syncs}
-
-        # Define Vespa counting function
-        async def count_vespa():
-            try:
-                vespa = await VespaDestination.create(
-                    collection_id=collection_id,
-                    organization_id=collection_syncs[0].organization_id,
-                    logger=ctx.logger,
-                )
-
-                # Semaphore to limit concurrent queries
-                semaphore = asyncio.Semaphore(MAX_CONCURRENT_COUNTS)
-
-                # Parallelize all sync counts for this collection (with limit)
-                async def count_vespa_sync(sync):
-                    async with semaphore:
-                        try:
-                            # Query all Vespa schemas (not just base_entity)
-                            all_schemas = ", ".join(VespaDestination._get_all_vespa_schemas())
-                            yql = (
-                                f"select * from sources {all_schemas} "
-                                f"where airweave_system_metadata_sync_id contains '{sync.id}' "
-                                f"and airweave_system_metadata_collection_id contains '{collection_id}' "
-                                f"limit 0"
-                            )
-
-                            query_params = {"yql": yql}
-                            response = await asyncio.to_thread(vespa.app.query, body=query_params)
-
-                            if response.is_successful():
-                                count = (
-                                    response.json.get("root", {})
-                                    .get("fields", {})
-                                    .get("totalCount", 0)
-                                )
-                                return sync.id, count
-                            else:
-                                error_msg = response.json.get("root", {}).get("errors", [])
-                                ctx.logger.warning(
-                                    f"Vespa query failed for sync {sync.id}: {error_msg}"
-                                )
-                                return sync.id, None
-                        except Exception as e:
-                            ctx.logger.warning(
-                                f"Failed to count Vespa docs for sync {sync.id}: {e}"
-                            )
-                            return sync.id, None
-
-                # Run all Vespa counts in parallel (limited to MAX_CONCURRENT_COUNTS)
-                results = await asyncio.gather(
-                    *[count_vespa_sync(sync) for sync in collection_syncs]
-                )
-                return {sync_id: count for sync_id, count in results}
-
-            except Exception as e:
-                ctx.logger.warning(
-                    f"Failed to create Vespa destination for collection {collection_id}: {e}"
-                )
-                return {sync.id: None for sync in collection_syncs}
-
-        # Run Qdrant and Vespa in parallel for this collection
-        qdrant_results, vespa_results = await asyncio.gather(
-            count_qdrant(), count_vespa(), return_exceptions=False
-        )
-
-        return qdrant_results, vespa_results
-
-    # Process all collections in parallel
-    collection_tasks = [
-        process_collection(coll_id, coll_syncs)
-        for coll_id, coll_syncs in syncs_by_collection.items()
-    ]
-    collection_results = await asyncio.gather(*collection_tasks, return_exceptions=True)
-
-    # Merge results from all collections
-    for result in collection_results:
-        if isinstance(result, Exception):
-            ctx.logger.error(f"Collection processing failed: {result}")
-            continue
-        qdrant_results, vespa_results = result
-        qdrant_count_map.update(qdrant_results)
-        vespa_count_map.update(vespa_results)
-
-    return qdrant_count_map, vespa_count_map
-
-
-def _build_admin_sync_info_list(
-    syncs: list,
-    sync_connections: dict,
-    source_conn_map: dict,
-    last_job_map: dict,
-    vespa_job_map: dict,
-    entity_count_map: dict,
-    arf_count_map: dict,
-    qdrant_count_map: dict,
-    vespa_count_map: dict,
-) -> List[AdminSyncInfo]:
-    """Build list of AdminSyncInfo from query results."""
-    admin_syncs = []
-    for sync in syncs:
-        conn_info = sync_connections.get(sync.id, {"source": None, "destinations": []})
-        source_info = source_conn_map.get(sync.id, {})
-        last_job = last_job_map.get(sync.id, {})
-        vespa_job = vespa_job_map.get(sync.id, {})
-
-        sync_dict = {**sync.__dict__}
-        if "_sa_instance_state" in sync_dict:
-            sync_dict.pop("_sa_instance_state")
-
-        sync_dict["source_connection_id"] = conn_info["source"]
-        sync_dict["destination_connection_ids"] = conn_info["destinations"]
-        sync_dict["total_entity_count"] = entity_count_map.get(sync.id, 0)
-        sync_dict["total_arf_entity_count"] = arf_count_map.get(sync.id)
-        sync_dict["total_qdrant_entity_count"] = qdrant_count_map.get(sync.id)
-        sync_dict["total_vespa_entity_count"] = vespa_count_map.get(sync.id)
-        # Handle status - may be enum or string depending on query
-        last_status = last_job.get("status")
-        sync_dict["last_job_status"] = (
-            (last_status.value if hasattr(last_status, "value") else last_status)
-            if last_status
-            else None
-        )
-        sync_dict["last_job_at"] = last_job.get("completed_at")
-        sync_dict["last_job_error"] = last_job.get("error")
-        sync_dict["source_short_name"] = source_info.get("short_name")
-        sync_dict["readable_collection_id"] = source_info.get("readable_collection_id")
-        sync_dict["source_is_authenticated"] = source_info.get("is_authenticated")
-
-        # Vespa migration tracking
-        sync_dict["last_vespa_job_id"] = vespa_job.get("id")
-        vespa_status = vespa_job.get("status")
-        sync_dict["last_vespa_job_status"] = (
-            (vespa_status.value if hasattr(vespa_status, "value") else vespa_status)
-            if vespa_status
-            else None
-        )
-        # Use completed_at if job is completed, otherwise use created_at for running/pending jobs
-        if vespa_job.get("completed_at"):
-            sync_dict["last_vespa_job_at"] = vespa_job.get("completed_at")
-        else:
-            sync_dict["last_vespa_job_at"] = vespa_job.get("created_at")
-        sync_dict["last_vespa_job_config"] = vespa_job.get("config")
-
-        admin_syncs.append(AdminSyncInfo.model_validate(sync_dict))
 
     return admin_syncs
 

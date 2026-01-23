@@ -37,6 +37,7 @@ class SyncJob(OrganizationBase, UserMixin):
     entities_encountered: Mapped[Optional[dict]] = mapped_column(JSON, default={})
     scheduled: Mapped[bool] = mapped_column(Boolean, default=False)
     sync_config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    sync_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     sync: Mapped["Sync"] = relationship(
         "Sync",

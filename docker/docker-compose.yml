@@ -235,13 +235,10 @@ services:
     restart: on-failure
 
   # Vespa single-node for development (config server + content + container combined)
-  # Enable with: --profile vespa
   vespa:
     container_name: airweave-vespa
     image: vespaengine/vespa:8
     hostname: vespa
-    profiles:
-      - vespa
     ports:
       - "8081:8081" # Query/Document API
       - "19071:19071" # Config server (for deployment)
@@ -261,8 +258,6 @@ services:
   vespa-init:
     container_name: airweave-vespa-init
     image: alpine:3.19
-    profiles:
-      - vespa
     volumes:
       - ../vespa/app:/app:ro
       - ../vespa/init-vespa.sh:/init-vespa.sh:ro
