@@ -7,19 +7,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from airweave.core.config import settings
 
-# Connection Pool Sizing Strategy:
-# - With proper connection management, workers only hold DB connections for milliseconds
-# - Database operations: entity lookup (~0.1s), insert/update (~0.1s)
-# - Even with 100 concurrent workers, only a few need connections at the same time
-# - Pool size 15 + overflow 15 = 30 total connections available
-# - This efficiently handles bursts while preventing connection exhaustion
-# - Multiple sync jobs can run simultaneously without issues
+# Connection Pool Sizing Strategy (PgBouncer-aware):
+# - PgBouncer handles connection pooling to PostgreSQL (2000 client → 300 DB connections)
+# - Production: 6 worker pods × 30 connections = 180 total (60% of backend pool capacity)
+# - SQLAlchemy pool sized for per-pod concurrency, not total system capacity
+# - Workers hold connections briefly: entity lookup (~0.1s), insert/update (~0.1s)
+# - Typical concurrency: ~30-40% of workers need DB simultaneously
+# - Base pool = worker count, overflow = 50% for burst capacity during guardrail flushes
+# - Example: 20 workers → 20 base + 10 overflow = 30 total connections per pod
 
 # Determine pool size based on worker count
 worker_count = getattr(settings, "SYNC_MAX_WORKERS", 100)
-# With on-demand connections: pool_size = workers * 0.15 (only 15% need DB at once)
-POOL_SIZE = min(15, max(10, int(worker_count * 0.15)))
-MAX_OVERFLOW = POOL_SIZE  # Allow doubling during spikes
+# Base pool matches worker count (each worker can hold 1 connection during active batch)
+POOL_SIZE = min(100, max(20, worker_count))
+# Overflow handles burst scenarios (guardrail flushes, multiple sync jobs, etc.)
+MAX_OVERFLOW = max(10, int(worker_count * 0.5))
 
 # Connection Pool Timeout Behavior:
 # - pool_timeout=30: Wait up to 30 seconds for a connection to become available

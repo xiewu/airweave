@@ -72,6 +72,13 @@ class SyncConfig(BaseSettings):
     @model_validator(mode="after")
     def validate_config_logic(self):
         """Validate that config combinations make sense."""
+        # At least one native vector DB must be enabled
+        if self.destinations.skip_qdrant and self.destinations.skip_vespa:
+            raise ValueError(
+                "Invalid config: both skip_qdrant and skip_vespa are True. "
+                "At least one vector database must be enabled."
+            )
+
         if self.destinations.target_destinations and self.destinations.exclude_destinations:
             overlap = set(self.destinations.target_destinations) & set(
                 self.destinations.exclude_destinations

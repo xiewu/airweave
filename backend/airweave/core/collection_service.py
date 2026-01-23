@@ -11,6 +11,7 @@ from airweave.core.exceptions import NotFoundException
 from airweave.db.unit_of_work import UnitOfWork
 from airweave.platform.destinations.qdrant import QdrantDestination
 from airweave.platform.destinations.vespa import VespaDestination
+from airweave.platform.sync.config.base import SyncConfig
 
 
 class CollectionService:
@@ -82,32 +83,39 @@ class CollectionService:
         collection = await crud.collection.create(db, obj_in=collection_data, ctx=ctx, uow=uow)
         await uow.session.flush()
 
-        # Create Qdrant destination with explicit vector size
-        qdrant_destination = await QdrantDestination.create(
-            credentials=None,  # Native Qdrant uses settings
-            config=None,
-            collection_id=collection.id,
-            organization_id=ctx.organization.id,
-            vector_size=vector_size,
-            logger=ctx.logger,
-        )
+        # Get sync config to determine which vector DBs are enabled
+        sync_config = SyncConfig()
 
-        # Setup the physical shared collection in Qdrant
-        await qdrant_destination.setup_collection()
+        # Create Qdrant destination if not skipped
+        if not sync_config.destinations.skip_qdrant:
+            try:
+                qdrant_destination = await QdrantDestination.create(
+                    credentials=None,  # Native Qdrant uses settings
+                    config=None,
+                    collection_id=collection.id,
+                    organization_id=ctx.organization.id,
+                    vector_size=vector_size,
+                    logger=ctx.logger,
+                )
+                # Setup the physical shared collection in Qdrant
+                await qdrant_destination.setup_collection()
+            except Exception as e:
+                ctx.logger.warning(f"Qdrant setup skipped (may not be configured): {e}")
 
-        # Initialize Vespa destination (no-op, schema deployed via vespa-deploy)
-        try:
-            vespa_destination = await VespaDestination.create(
-                credentials=None,
-                config=None,
-                collection_id=collection.id,
-                organization_id=ctx.organization.id,
-                logger=ctx.logger,
-                sync_id=None,
-            )
-            await vespa_destination.setup_collection()
-        except Exception as e:
-            ctx.logger.warning(f"Vespa setup skipped (may not be configured): {e}")
+        # Initialize Vespa destination if not skipped
+        if not sync_config.destinations.skip_vespa:
+            try:
+                vespa_destination = await VespaDestination.create(
+                    credentials=None,
+                    config=None,
+                    collection_id=collection.id,
+                    organization_id=ctx.organization.id,
+                    logger=ctx.logger,
+                    sync_id=None,
+                )
+                await vespa_destination.setup_collection()
+            except Exception as e:
+                ctx.logger.warning(f"Vespa setup skipped (may not be configured): {e}")
 
         return schemas.Collection.model_validate(collection, from_attributes=True)
 
