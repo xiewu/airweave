@@ -160,7 +160,7 @@ async def search(
             "temporal_relevance is under construction and was ignored"
         )
 
-    # Execute search with new service
+    # Execute search with new service (always use Vespa for public endpoints)
     search_response = await service.search(
         request_id=ctx.request_id,
         readable_collection_id=readable_id,
@@ -168,6 +168,7 @@ async def search(
         stream=False,
         db=db,
         ctx=ctx,
+        destination_override="vespa",
     )
 
     ctx.logger.info(f"Search completed for collection '{readable_id}'")
@@ -224,6 +225,7 @@ async def stream_search_collection_advanced(  # noqa: C901 - streaming orchestra
     async def _run_search() -> None:
         try:
             async with AsyncSessionLocal() as search_db:
+                # Always use Vespa for public endpoints
                 await service.search(
                     request_id=request_id,
                     readable_collection_id=readable_id,
@@ -231,6 +233,7 @@ async def stream_search_collection_advanced(  # noqa: C901 - streaming orchestra
                     stream=True,
                     db=search_db,
                     ctx=ctx,
+                    destination_override="vespa",
                 )
         except ValueError as e:
             await _publish_stream_error(message=str(e), transient=False)

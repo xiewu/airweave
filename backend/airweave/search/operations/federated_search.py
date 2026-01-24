@@ -453,18 +453,19 @@ class FederatedSearch(SearchOperation):
         return merged
 
     def _get_result_id(self, result: Dict) -> str:
-        """Extract unique ID from result."""
-        # Try different ID fields
-        return (
-            result.get("id")
-            or result.get("payload", {}).get("entity_id")
-            or result.get("payload", {}).get("id")
-            or result.get("payload", {}).get("_id")
-            or str(result)
-        )
+        """Extract unique ID from result in AirweaveSearchResult format.
+
+        In the new unified format, entity_id is at the top level.
+        """
+        # With AirweaveSearchResult format, entity_id is at top level
+        return result.get("id") or result.get("entity_id") or str(result)
 
     def _entity_to_result(self, entity: Any, source_name: str, rank: int) -> Dict:
-        """Convert entity to result dictionary matching vector DB format.
+        """Convert entity to result dictionary matching AirweaveSearchResult format.
+
+        Converts BaseEntity from federated source to the unified AirweaveSearchResult
+        format that matches what Qdrant and Vespa destinations return. This ensures
+        consistent result structure across all search sources.
 
         Args:
             entity: BaseEntity from federated source
@@ -472,9 +473,9 @@ class FederatedSearch(SearchOperation):
             rank: Position of this result in the source's result list (for RRF)
 
         Returns:
-            Dictionary with result data in vector DB format
+            Dictionary with result data in AirweaveSearchResult format
         """
-        # Convert entity to dict (UUIDs->strings, datetimes->ISO, same as vector DB)
+        # Convert entity to dict (UUIDs->strings, datetimes->ISO)
         payload = entity.model_dump(mode="json", exclude_none=True)
 
         # Extract score if available (from entity metadata or system metadata)
@@ -482,12 +483,62 @@ class FederatedSearch(SearchOperation):
         if hasattr(entity, "score") and entity.score is not None:
             score = float(entity.score)
 
-        # Build result in same format as Qdrant results
+        # Extract top-level fields that are part of AirweaveSearchResult schema
+        entity_id = payload.get("entity_id", "")
+        name = payload.get("name", "")
+        textual_representation = payload.get("textual_representation", "")
+        created_at = payload.get("created_at")
+        updated_at = payload.get("updated_at")
+        breadcrumbs = payload.get("breadcrumbs", [])
+
+        # Extract system metadata
+        sys_meta = payload.get("airweave_system_metadata", {})
+        system_metadata = {
+            "entity_type": sys_meta.get("entity_type", ""),
+            "source_name": sys_meta.get("source_name") or source_name,
+            "sync_id": sys_meta.get("sync_id"),
+            "sync_job_id": sys_meta.get("sync_job_id"),
+            "original_entity_id": sys_meta.get("original_entity_id"),
+            "chunk_index": sys_meta.get("chunk_index"),
+        }
+
+        # Extract access control
+        access = None
+        access_data = payload.get("access")
+        if access_data:
+            access = {
+                "is_public": access_data.get("is_public", False),
+                "viewers": access_data.get("viewers", []),
+            }
+
+        # Build source_fields from remaining payload fields
+        # Exclude known top-level fields that are in AirweaveSearchResult schema
+        known_fields = {
+            "entity_id",
+            "name",
+            "textual_representation",
+            "created_at",
+            "updated_at",
+            "breadcrumbs",
+            "airweave_system_metadata",
+            "access",
+        }
+        source_fields = {k: v for k, v in payload.items() if k not in known_fields}
+
+        # Build result in AirweaveSearchResult format (as dict, not Pydantic object)
+        # This matches the structure returned by Qdrant and Vespa destinations
         result = {
-            "id": entity.entity_id,
+            "id": entity_id,
             "score": score,
-            "payload": payload,
-            "source_type": "federated",  # Mark as federated for debugging
+            "entity_id": entity_id,
+            "name": name,
+            "textual_representation": textual_representation,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "breadcrumbs": breadcrumbs,
+            "system_metadata": system_metadata,
+            "access": access,
+            "source_fields": source_fields,
         }
 
         return result

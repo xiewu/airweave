@@ -9,19 +9,22 @@ from airweave.core.config import settings
 
 # Connection Pool Sizing Strategy (PgBouncer-aware):
 # - PgBouncer handles connection pooling to PostgreSQL (2000 client → 300 DB connections)
-# - Production: 6 worker pods × 30 connections = 180 total (60% of backend pool capacity)
+# - Production: 6 worker pods × 60 connections = 360 total (120% of backend pool capacity)
 # - SQLAlchemy pool sized for per-pod concurrency, not total system capacity
-# - Workers hold connections briefly: entity lookup (~0.1s), insert/update (~0.1s)
-# - Typical concurrency: ~30-40% of workers need DB simultaneously
-# - Base pool = worker count, overflow = 50% for burst capacity during guardrail flushes
-# - Example: 20 workers → 20 base + 10 overflow = 30 total connections per pod
+# - During batch processing, workers can hold 2-3 connections simultaneously:
+#   1. ActionResolver bulk entity hash lookup
+#   2. EntityPostgresHandler batch insert/update/delete
+#   3. GuardRailService usage flush (every 100 entities)
+# - Base pool = worker count, overflow = 2× workers for peak concurrent DB operations
+# - Example: 20 workers → 20 base + 40 overflow = 60 total connections per pod
 
 # Determine pool size based on worker count
 worker_count = getattr(settings, "SYNC_MAX_WORKERS", 100)
 # Base pool matches worker count (each worker can hold 1 connection during active batch)
 POOL_SIZE = min(100, max(20, worker_count))
-# Overflow handles burst scenarios (guardrail flushes, multiple sync jobs, etc.)
-MAX_OVERFLOW = max(10, int(worker_count * 0.5))
+# Overflow handles multiple connections per worker during batch processing
+# Each worker can need 2-3 simultaneous connections: resolver + postgres write + guardrail flush
+MAX_OVERFLOW = max(20, int(worker_count * 2))
 
 # Connection Pool Timeout Behavior:
 # - pool_timeout=30: Wait up to 30 seconds for a connection to become available

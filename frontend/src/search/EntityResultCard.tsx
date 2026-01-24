@@ -47,9 +47,9 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
     const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set());
     const { resolvedTheme } = useTheme();
 
-    // Extract payload from result
-    const payload = result.payload || result;
     const score = result.score;
+
+    const sourceFields = result.source_fields || {};
 
     // Determine if score looks like cosine similarity (0-1 range) or something else
     const isNormalizedScore = score !== undefined && score >= 0 && score <= 1;
@@ -75,14 +75,15 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
 
     const scoreDisplay = getScoreDisplay();
 
-    // Extract key fields
-    const entityId = payload.entity_id || payload.id || payload._id;
-    const sourceName = payload.airweave_system_metadata?.source_name || payload.source_name || 'Unknown Source';
+    // Extract key fields from flat AirweaveSearchResult structure
+    const entityId = result.entity_id;
+    const sourceName = result.system_metadata?.source_name || 'Unknown Source';
     const sourceIconUrl = getAppIconUrl(sourceName, resolvedTheme);
-    const textualRepresentation = payload.textual_representation || '';
-    const breadcrumbs = payload.breadcrumbs || [];
-    const webUrl = payload.web_url;
-    const url = payload.url;
+    const textualRepresentation = result.textual_representation || '';
+    const breadcrumbs = result.breadcrumbs || [];
+    // URL fields are in source_fields
+    const webUrl = sourceFields.web_url;
+    const url = sourceFields.url;
     const openUrl = webUrl || url;
     const hasDownloadUrl = Boolean(url && webUrl && url !== webUrl);
 
@@ -91,10 +92,10 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
         return textualRepresentation;
     }, [textualRepresentation]);
 
-    // Extract title and metadata from payload
-    const title = payload.name || 'Untitled';
+    // Extract title and metadata from flat result structure
+    const title = result.name || 'Untitled';
     const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const rawEntityType = payload.airweave_system_metadata?.entity_type || '';
+    const rawEntityType = result.system_metadata?.entity_type || '';
     let entityTypeCore = rawEntityType.replace(/Entity$/, '');
     if (entityTypeCore && sourceName) {
         const normalizedSource = sourceName.replace(/[\s_-]/g, '');
@@ -114,7 +115,7 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
     ).filter(Boolean).join(' > ') : '';
 
     // Extract the most relevant timestamp (updated_at, fallback to created_at)
-    const relevantTimestamp = payload.updated_at || payload.created_at;
+    const relevantTimestamp = result.updated_at || result.created_at;
 
     // Get Airweave logo for section headers
     const airweaveLogo = isDark
@@ -127,19 +128,16 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
         .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
         .join(' ');
 
-    // Extract metadata (exclude system fields and already displayed fields)
+    // Extract metadata from source_fields (source-specific fields)
     const metadata = useMemo(() => {
         const filtered: Record<string, any> = {};
         const excludeKeys = [
-            'entity_id', 'id', '_id',
+            'url', 'web_url',  // Already displayed as links
             'textual_representation',  // Already displayed in preview
-            'name', 'breadcrumbs', 'url', 'web_url',
-            'airweave_system_metadata', 'source_name',
-            'created_at', 'updated_at',  // Displayed in timestamp badge
             'vector', 'vectors'
         ];
 
-        Object.entries(payload).forEach(([key, value]) => {
+        Object.entries(sourceFields).forEach(([key, value]) => {
             if (!excludeKeys.includes(key) && value !== null && value !== undefined && value !== '') {
                 // Format key names nicely
                 const formattedKey = key
@@ -151,7 +149,7 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
         });
 
         return filtered;
-    }, [payload]);
+    }, [sourceFields]);
 
     const hasMetadata = Object.keys(metadata).length > 0;
 
@@ -339,12 +337,12 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
                             </div>
                             <div className="flex-1 min-w-0 pt-0.5">
                                 <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                                <h3 className={cn(
+                                    <h3 className={cn(
                                         "text-[14px] font-semibold break-words leading-snug tracking-tight",
-                                    isDark ? "text-gray-50" : "text-gray-900"
-                                )}>
-                                    {title}
-                                </h3>
+                                        isDark ? "text-gray-50" : "text-gray-900"
+                                    )}>
+                                        {title}
+                                    </h3>
                                     {openUrl && (
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <a
@@ -433,7 +431,7 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
                                                             "text-[11px] font-bold tracking-wide",
                                                             isDark ? "text-gray-300" : "text-gray-700"
                                                         )}>
-                                                            {payload.updated_at ? 'Last Updated' : 'Created'}
+                                                            {result.updated_at ? 'Last Updated' : 'Created'}
                                                         </div>
                                                         <div className={cn(
                                                             "text-[12px] font-mono",
@@ -903,7 +901,7 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
                                 : "bg-gray-50/80 border-gray-200/60"
                         )}>
                             <button
-                                onClick={() => handleCopy(JSON.stringify(payload, null, 2), 'raw')}
+                                onClick={() => handleCopy(JSON.stringify(result, null, 2), 'raw')}
                                 className={cn(
                                     "flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-all duration-200",
                                     isDark
@@ -956,7 +954,7 @@ const EntityResultCardComponent: React.FC<EntityResultCardProps> = ({
                                     </pre>
                                 )}
                             >
-                                {JSON.stringify(payload, null, 2)}
+                                {JSON.stringify(result, null, 2)}
                             </SyntaxHighlighter>
                         </div>
                     </div>

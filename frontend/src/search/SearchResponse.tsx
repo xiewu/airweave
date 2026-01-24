@@ -146,9 +146,8 @@ export const SearchResponse: React.FC<SearchResponseProps> = ({
         };
 
         results.forEach((result: any, idx: number) => {
-            const payload = result.payload || result;
-            const entityId = payload.entity_id || payload.id || payload._id;
-            const rawSourceName = payload.airweave_system_metadata?.source_name || payload.source_name || 'Unknown';
+            const entityId = result.entity_id;
+            const rawSourceName = result.system_metadata?.source_name || 'Unknown';
             const sourceName = formatSourceName(rawSourceName);
 
             if (entityId) {
@@ -305,12 +304,7 @@ export const SearchResponse: React.FC<SearchResponseProps> = ({
         setTimeout(() => {
             // Find the entity in the results array
             const entityIndex = results.findIndex((result: any) => {
-                const payload = result.payload || result;
-                const found = payload.entity_id === entityId ||
-                    payload.id === entityId ||
-                    payload._id === entityId;
-
-                return found;
+                return result.entity_id === entityId;
             });
 
             if (entityIndex === -1) {
@@ -2067,7 +2061,7 @@ export const SearchResponse: React.FC<SearchResponseProps> = ({
                                         >
                                             {results.slice(0, visibleResultsCount).map((result: any, index: number) => (
                                                 <EntityResultCard
-                                                    key={result.payload?.entity_id || result.id || index}
+                                                    key={result.entity_id || result.id || index}
                                                     result={result}
                                                     index={index}
                                                     isDark={isDark}

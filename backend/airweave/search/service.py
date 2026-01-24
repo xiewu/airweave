@@ -35,8 +35,23 @@ class SearchService:
         stream: bool,
         db: AsyncSession,
         ctx: ApiContext,
+        destination_override: SearchDestination | None = None,
     ) -> SearchResponse:
-        """Search a collection."""
+        """Search a collection.
+
+        Args:
+            request_id: Unique request identifier
+            readable_collection_id: Collection readable ID to search
+            search_request: Search parameters
+            stream: Whether to enable SSE streaming
+            db: Database session
+            ctx: API context
+            destination_override: If provided, override the default destination
+                ('qdrant' or 'vespa'). If None, uses SyncConfig default.
+
+        Returns:
+            SearchResponse with results
+        """
         start_time = time.monotonic()
 
         collection = await crud.collection.get_by_readable_id(
@@ -47,7 +62,14 @@ class SearchService:
 
         ctx.logger.debug("Building search context")
         search_context = await factory.build(
-            request_id, collection.id, readable_collection_id, search_request, stream, ctx, db
+            request_id,
+            collection.id,
+            readable_collection_id,
+            search_request,
+            stream,
+            ctx,
+            db,
+            destination_override=destination_override,
         )
 
         ctx.logger.debug("Executing search")

@@ -166,12 +166,36 @@ class SnapshotSource(BaseSource):
             return None
 
         try:
+            # Strip full storage path if present (ARF may store full paths like raw/{sync_id}/files/...)
+            # Extract just the relative path within the snapshot directory
+            if "/" in stored_file_path and "files/" in stored_file_path:
+                # Extract everything from 'files/' onward
+                files_idx = stored_file_path.find("files/")
+                if files_idx != -1:
+                    stored_file_path = stored_file_path[files_idx:]
+
             # Ensure stored_file_path includes 'files/' prefix
             if not stored_file_path.startswith("files/"):
                 stored_file_path = f"files/{stored_file_path}"
 
+            # Validate path to prevent traversal attacks
+            if ".." in stored_file_path:
+                self.logger.warning(f"Rejected path with '..' component: {stored_file_path}")
+                return None
+
             source_path = self._local_path(stored_file_path)
+
+            # Verify resolved path is still within snapshot directory (additional safety check)
+            base_path = self._local_path().resolve()
+            try:
+                resolved_path = source_path.resolve()
+                resolved_path.relative_to(base_path)
+            except ValueError:
+                self.logger.warning(f"Path traversal attempt detected: {stored_file_path}")
+                return None
+
             if not source_path.exists():
+                self.logger.debug(f"File not found at {source_path}")
                 return None
 
             # Create temp directory if needed
@@ -242,10 +266,20 @@ class SnapshotSource(BaseSource):
             return None
 
         try:
+            # Strip full storage path if present
+            if "/" in stored_file_path and "files/" in stored_file_path:
+                files_idx = stored_file_path.find("files/")
+                if files_idx != -1:
+                    stored_file_path = stored_file_path[files_idx:]
+
             # Ensure stored_file_path includes 'files/' prefix
-            # Legacy snapshots may have just the filename without the folder
             if not stored_file_path.startswith("files/"):
                 stored_file_path = f"files/{stored_file_path}"
+
+            # Validate path to prevent traversal attacks
+            if ".." in stored_file_path:
+                self.logger.warning(f"Rejected path with '..' component: {stored_file_path}")
+                return None
 
             blob_path = f"{self._azure_blob_prefix.rstrip('/')}/{stored_file_path}"
             client = self._get_azure_client()
@@ -309,9 +343,20 @@ class SnapshotSource(BaseSource):
             return None
 
         try:
+            # Strip full storage path if present
+            if "/" in stored_file_path and "files/" in stored_file_path:
+                files_idx = stored_file_path.find("files/")
+                if files_idx != -1:
+                    stored_file_path = stored_file_path[files_idx:]
+
             # Ensure stored_file_path includes 'files/' prefix
             if not stored_file_path.startswith("files/"):
                 stored_file_path = f"files/{stored_file_path}"
+
+            # Validate path to prevent traversal attacks
+            if ".." in stored_file_path:
+                self.logger.warning(f"Rejected path with '..' component: {stored_file_path}")
+                return None
 
             full_path = f"{self.path.rstrip('/')}/{stored_file_path}"
             content = await self.storage.read_file(full_path)

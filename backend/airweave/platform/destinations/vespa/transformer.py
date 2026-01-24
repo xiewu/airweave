@@ -6,6 +6,7 @@ Pure transformation logic with no I/O dependencies.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -21,6 +22,42 @@ from airweave.platform.entities._base import (
     FileEntity,
     WebEntity,
 )
+
+
+def _sanitize_for_vespa(text: str) -> str:
+    """Sanitize text for Vespa by removing illegal characters.
+
+    Vespa strictly rejects:
+    1. Control characters (code points < 32) except \n (0x0A), \r (0x0D), \t (0x09)
+    2. Unicode noncharacters (U+FDD0..U+FDEF, U+FFFE, U+FFFF, and plane pairs)
+
+    Common culprits:
+    - Control: 0x00 (null), 0x01 (SOH), 0x0B (vertical tab)
+    - Nonchars: 0xFDDC, 0xFFFE, 0xFFFF
+
+    Args:
+        text: Raw text that may contain illegal characters
+
+    Returns:
+        Sanitized text safe for Vespa
+    """
+    if not text:
+        return text
+
+    # Remove ASCII control characters (except \n, \r, \t) and Unicode noncharacters
+    # U+FDD0..U+FDEF: 32 noncharacters
+    # U+FFFE, U+FFFF and pairs in all planes (U+1FFFE, U+1FFFF, ..., U+10FFFE, U+10FFFF)
+    return re.sub(
+        r"[\x00-\x08\x0B\x0C\x0E-\x1F\uFDD0-\uFDEF\uFFFE\uFFFF]|"
+        r"[\U0001FFFE\U0001FFFF\U0002FFFE\U0002FFFF\U0003FFFE\U0003FFFF"
+        r"\U0004FFFE\U0004FFFF\U0005FFFE\U0005FFFF\U0006FFFE\U0006FFFF"
+        r"\U0007FFFE\U0007FFFF\U0008FFFE\U0008FFFF\U0009FFFE\U0009FFFF"
+        r"\U000AFFFE\U000AFFFF\U000BFFFE\U000BFFFF\U000CFFFE\U000CFFFF"
+        r"\U000DFFFE\U000DFFFF\U000EFFFE\U000EFFFF\U000FFFFE\U000FFFFF"
+        r"\U0010FFFE\U0010FFFF]",
+        "",
+        text,
+    )
 
 
 def _get_system_metadata_fields() -> set[str]:
@@ -167,7 +204,18 @@ class EntityTransformer:
         if entity.updated_at:
             fields["updated_at"] = int(entity.updated_at.timestamp())
         if entity.textual_representation:
-            fields["textual_representation"] = entity.textual_representation
+            # Sanitize text to remove control characters that Vespa rejects
+            sanitized = _sanitize_for_vespa(entity.textual_representation)
+
+            # Log if we removed control characters
+            if len(sanitized) != len(entity.textual_representation):
+                removed = len(entity.textual_representation) - len(sanitized)
+                self._logger.debug(
+                    f"[VespaTransformer] Removed {removed} control characters from "
+                    f"{entity.entity_id} (type: {entity.__class__.__name__})"
+                )
+
+            fields["textual_representation"] = sanitized
         return fields
 
     def _add_system_metadata_fields(
