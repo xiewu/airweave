@@ -104,7 +104,7 @@ def _flatten_operation_metrics(properties: Dict[str, Any], state: Dict[str, Any]
         state: State dict containing operation metrics
     """
     # Extract operation metrics
-    operation_metrics = state.get("_operation_metrics", {})
+    operation_metrics = state.get("operation_metrics", {})
     if not operation_metrics:
         return
 
@@ -145,7 +145,7 @@ def _flatten_operation_metrics(properties: Dict[str, Any], state: Dict[str, Any]
             properties[prop_name] = value
 
     # Extract provider usage (captured by fallback method)
-    provider_usage = state.get("_provider_usage", {})
+    provider_usage = state.get("provider_usage", {})
     if provider_usage:
         # Keep nested structure for full context
         properties["providers_used"] = provider_usage

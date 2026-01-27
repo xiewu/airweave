@@ -299,7 +299,7 @@ class SearchService:
         ctx: ApiContext,
     ) -> None:
         """Mark source connections as unauthenticated on federated auth errors."""
-        failed_conn_ids: List[str] = state.get("_failed_federated_auth", [])
+        failed_conn_ids: List[str] = state.get("failed_federated_auth", [])
         if not failed_conn_ids:
             return
 
