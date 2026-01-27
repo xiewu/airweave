@@ -19,26 +19,26 @@ class Breadcrumb(BaseModel):
     entity_type: str = Field(..., description="Entity class name (e.g., 'AsanaProjectEntity').")
 
 
-class VespaContent(BaseModel):
-    """Vespa-specific content for entity-as-document model.
+class AccessControl(BaseModel):
+    """Access control metadata for an entity (source-agnostic).
 
-    Unlike Qdrant (chunk-as-document where each chunk is a separate entity),
-    Vespa stores all chunks and embeddings as arrays within a single entity.
+    Stores who can view this entity as principal identifiers.
+    Principals are NOT expanded - groups stored as-is.
 
-    Fields:
-        chunks: List of chunked text segments from the entity's textual representation.
-        chunk_small_embeddings: Binary-packed int8 embeddings for ANN search (96-dim).
-        chunk_large_embeddings: Full precision embeddings for ranking (768-dim).
+    Format:
+        - Users: "user:john@acme.com"
+        - Groups: "group:<group_id>" (e.g., "group:engineering" or "group:uuid-123")
+
+    Note: Only sources with supports_access_control=True should set this field.
+    Sources without access control support should leave this as None.
     """
 
-    chunks: List[str] = Field(default_factory=list, description="Chunked text segments")
-    chunk_small_embeddings: List[List[int]] = Field(
-        default_factory=list,
-        description="Binary-packed int8 embeddings for ANN search (96-dim)",
+    viewers: List[str] = Field(
+        default_factory=list, description="Principal IDs who can view this entity"
     )
-    chunk_large_embeddings: List[List[float]] = Field(
-        default_factory=list,
-        description="Full precision embeddings for ranking (768-dim)",
+    is_public: bool = Field(
+        default=False,
+        description="Whether this entity is publicly accessible.",
     )
 
 
@@ -112,8 +112,10 @@ class BaseEntity(BaseModel):
     airweave_system_metadata: Optional[AirweaveSystemMetadata] = Field(
         None, description="System metadata for this entity."
     )
-    vespa_content: Optional[VespaContent] = Field(
-        None, description="Vespa chunks and embeddings (entity-as-document model)"
+
+    # Access control - only set by sources with supports_access_control=True
+    access: Optional[AccessControl] = Field(
+        None, description="Access control - who can view this entity (not expanded)"
     )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

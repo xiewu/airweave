@@ -53,6 +53,7 @@ class Retrieval(SearchOperation):
         return [
             "QueryInterpretation",
             "EmbedQuery",
+            "AccessControlFilter",  # Must run before retrieval to build ACL filter
             "UserFilter",
             "TemporalRelevance",
         ]

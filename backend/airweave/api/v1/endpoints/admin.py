@@ -1267,101 +1267,71 @@ async def admin_search_collection(
     Raises:
         HTTPException: If not admin or collection not found
     """
-    import time
-
-    from sqlalchemy import select as sa_select
-
-    from airweave.models.collection import Collection
-    from airweave.search.orchestrator import orchestrator
+    from airweave.search.service import service
 
     _require_admin_permission(ctx, FeatureFlagEnum.API_KEY_ADMIN_SYNC)
 
-    # Get collection without organization filtering
-    result = await db.execute(sa_select(Collection).where(Collection.readable_id == readable_id))
-    collection = result.scalar_one_or_none()
-
-    if not collection:
-        raise NotFoundException(f"Collection '{readable_id}' not found")
-
-    ctx.logger.info(
-        f"Admin searching collection {readable_id} (org: {collection.organization_id}) "
-        f"using destination: {destination.value}"
-    )
-
-    start_time = time.monotonic()
-
-    # Create destination based on selection
-    dest_instance = await _create_admin_search_destination(
-        destination=destination,
-        collection_id=collection.id,
-        organization_id=collection.organization_id,
-        vector_size=collection.vector_size,
-        ctx=ctx,
-    )
-
-    # Build search context with custom destination factory
-    search_context = await _build_admin_search_context(
-        db=db,
-        collection=collection,
-        readable_id=readable_id,
+    return await service.search_admin(
+        request_id=ctx.request_id,
+        readable_collection_id=readable_id,
         search_request=search_request,
-        destination=dest_instance,
+        db=db,
         ctx=ctx,
+        destination=destination.value,
     )
 
-    # Execute search
-    ctx.logger.debug("Executing admin search")
-    response, state = await orchestrator.run(ctx, search_context)
 
-    duration_ms = (time.monotonic() - start_time) * 1000
-
-    ctx.logger.info(
-        f"Admin search completed for collection {readable_id} ({destination.value}): "
-        f"{len(response.results)} results in {duration_ms:.2f}ms"
-    )
-
-    return response
-
-
-async def _create_admin_search_destination(
-    destination: AdminSearchDestination,
-    collection_id: UUID,
-    organization_id: UUID,
-    vector_size: int,
-    ctx: ApiContext,
-):
-    """Create destination instance for admin search.
+@router.post("/collections/{readable_id}/search/as-user", response_model=schemas.SearchResponse)
+async def admin_search_collection_as_user(
+    readable_id: str,
+    search_request: schemas.SearchRequest,
+    user_principal: str = Query(
+        ...,
+        description="User principal (username) to search as. "
+        "This user's access permissions will be applied to filter results.",
+    ),
+    db: AsyncSession = Depends(deps.get_db),
+    ctx: ApiContext = Depends(deps.get_context),
+    destination: AdminSearchDestination = Query(
+        AdminSearchDestination.VESPA,
+        description="Search destination: 'qdrant' or 'vespa' (default)",
+    ),
+) -> schemas.SearchResponse:
+    """Admin-only: Search collection with access control for a specific user.
+    This endpoint allows testing access control filtering by searching as a
+    specific user. It resolves the user's group memberships from the
+    access_control_membership table and filters results accordingly.
+    Use this for:
+    - Testing ACL sync correctness
+    - Verifying user permissions
+    - Debugging access control issues
 
     Args:
-        destination: Which destination to use
-        collection_id: Collection UUID
-        organization_id: Organization UUID
-        vector_size: Vector dimensions
-        ctx: API context
+        readable_id: The readable ID of the collection to search
+        search_request: The search request parameters
+        user_principal: Username to search as (e.g., "john" or "john@example.com")
+        db: Database session
+        destination: Search destination ('qdrant' or 'vespa')
 
     Returns:
-        Destination instance (Qdrant or Vespa)
+        SearchResponse with results filtered by user's access permissions
+
+    Raises:
+        HTTPException: If not admin or collection not found
     """
-    if destination == AdminSearchDestination.VESPA:
-        from airweave.platform.destinations.vespa import VespaDestination
+    from airweave.search.service import service
 
-        ctx.logger.info("Creating Vespa destination for admin search")
-        return await VespaDestination.create(
-            collection_id=collection_id,
-            organization_id=organization_id,
-            vector_size=vector_size,
-            logger=ctx.logger,
-        )
-    else:
-        from airweave.platform.destinations.qdrant import QdrantDestination
+    _require_admin_permission(ctx, FeatureFlagEnum.API_KEY_ADMIN_SYNC)
 
-        ctx.logger.info("Creating Qdrant destination for admin search")
-        return await QdrantDestination.create(
-            collection_id=collection_id,
-            organization_id=organization_id,
-            vector_size=vector_size,
-            logger=ctx.logger,
-        )
+    return await service.search_as_user(
+        request_id=ctx.request_id,
+        readable_collection_id=readable_id,
+        search_request=search_request,
+        db=db,
+        ctx=ctx,
+        user_principal=user_principal,
+        destination=destination.value,
+    )
 
 
 async def _build_admin_search_context(

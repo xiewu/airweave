@@ -16,8 +16,18 @@ from airweave.core.logging import logger
 from airweave.platform.builders import SyncContextBuilder
 from airweave.platform.sync.actions import EntityActionResolver, EntityDispatcherBuilder
 from airweave.platform.sync.config import SyncConfig, SyncConfigBuilder
+from airweave.platform.sync.access_control_pipeline import AccessControlPipeline
+from airweave.platform.sync.actions import (
+    ACActionDispatcher,
+    ACActionResolver,
+    EntityActionResolver,
+    EntityDispatcherBuilder,
+)
+from airweave.platform.sync.config import SyncExecutionConfig
 from airweave.platform.sync.entity_pipeline import EntityPipeline
+from airweave.platform.sync.handlers import ACPostgresHandler
 from airweave.platform.sync.orchestrator import SyncOrchestrator
+from airweave.platform.sync.pipeline.acl_membership_tracker import ACLMembershipTracker
 from airweave.platform.sync.stream import AsyncSourceStream
 from airweave.platform.sync.worker_pool import AsyncWorkerPool
 
@@ -109,13 +119,27 @@ class SyncFactory:
             logger=sync_context.logger,
         )
 
-        # Step 3: Build pipeline
+        # Step 3: Build pipelines
         action_resolver = EntityActionResolver(entity_map=sync_context.entity_map)
 
         entity_pipeline = EntityPipeline(
             entity_tracker=sync_context.entity_tracker,
             action_resolver=action_resolver,
             action_dispatcher=dispatcher,
+        )
+
+        # Access control pipeline (simple resolver + dispatcher)
+        access_control_resolver = ACActionResolver()
+        access_control_dispatcher = ACActionDispatcher(handlers=[ACPostgresHandler()])
+        access_control_tracker = ACLMembershipTracker(
+            source_connection_id=sync_context.source_connection_id,
+            organization_id=sync_context.organization_id,
+            logger=sync_context.logger,
+        )
+        access_control_pipeline = AccessControlPipeline(
+            resolver=access_control_resolver,
+            dispatcher=access_control_dispatcher,
+            tracker=access_control_tracker,
         )
 
         # Step 4: Create worker pool
@@ -134,6 +158,7 @@ class SyncFactory:
             worker_pool=worker_pool,
             stream=stream,
             sync_context=sync_context,
+            access_control_pipeline=access_control_pipeline,
         )
 
         logger.info(f"Total orchestrator initialization took {time.time() - init_start:.2f}s")

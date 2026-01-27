@@ -51,9 +51,9 @@ class UserFilter(SearchOperation):
         """Depends on operations that may write to state["filter"].
 
         Reads from state:
-        - state["filter"] from QueryInterpretation (if ran)
+        - state["filter"] from QueryInterpretation or AccessControlFilter (if ran)
         """
-        return ["QueryInterpretation"]
+        return ["QueryInterpretation", "AccessControlFilter"]
 
     async def execute(
         self,
@@ -64,6 +64,7 @@ class UserFilter(SearchOperation):
         """Merge user filter with existing filter in state.
 
         The existing filter may include:
+        - Access control filter (from AccessControlFilter)
         - Extracted filter (from QueryInterpretation)
         """
         ctx.logger.debug("[UserFilter] Applying user filter")
@@ -97,9 +98,10 @@ class UserFilter(SearchOperation):
 
         # Emit filter applied
         if merged_filter:
+            has_access_control = state.access_principals is not None
             await context.emitter.emit(
                 "filter_applied",
-                {"filter": merged_filter},
+                {"filter": merged_filter, "has_access_control": has_access_control},
                 op_name=self.__class__.__name__,
             )
 

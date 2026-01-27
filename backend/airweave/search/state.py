@@ -22,7 +22,8 @@ class SearchState(BaseModel):
     - QueryExpansion -> expanded_queries
     - QueryInterpretation -> interpreted_filter
     - EmbedQuery -> dense_embeddings, sparse_embeddings
-    - UserFilter -> filter (merged from user + interpreted)
+    - AccessControlFilter -> acl_filter, access_principals, filter (merged)
+    - UserFilter -> filter (merged from user + interpreted + acl)
     - TemporalRelevance -> temporal_config, filter (updated)
     - Retrieval -> results
     - FederatedSearch -> results (extended)
@@ -53,8 +54,19 @@ class SearchState(BaseModel):
     interpreted_filter: Optional[Dict[str, Any]] = Field(
         default=None, description="Filter extracted from natural language query"
     )
+    acl_filter: Optional[Dict[str, Any]] = Field(
+        default=None, description="Access control filter from ACL operation"
+    )
     filter: Optional[Dict[str, Any]] = Field(
-        default=None, description="Final merged filter (user + interpreted)"
+        default=None, description="Final merged filter (user + interpreted + acl)"
+    )
+
+    # =========================================================================
+    # Access control
+    # =========================================================================
+    access_principals: Optional[List[str]] = Field(
+        default=None,
+        description="Resolved access principals for the user (None = no AC sources)",
     )
 
     # =========================================================================

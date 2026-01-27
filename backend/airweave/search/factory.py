@@ -24,6 +24,7 @@ from airweave.search.context import SearchContext
 from airweave.search.emitter import EventEmitter
 from airweave.search.helpers import search_helpers
 from airweave.search.operations import (
+    AccessControlFilter,
     EmbedQuery,
     FederatedSearch,
     GenerateAnswer,
@@ -388,7 +389,40 @@ class SearchFactory:
             getattr(destination, "_supports_temporal_relevance", True) if destination else False
         )
 
+        # Build access control filter operation if we have user context
+        # This resolves the user's access principals and builds the filter
+        access_control_op = None
+
+        # Determine the user email for ACL - prefer override, fall back to logged-in user
+        acl_user_email = user_principal_override
+        if acl_user_email is None and ctx is not None and ctx.user is not None:
+            acl_user_email = ctx.user.email
+
+        # Determine organization ID - prefer explicit, fall back to ctx
+        acl_org_id = organization_id
+        if acl_org_id is None and ctx is not None:
+            acl_org_id = ctx.organization.id
+
+        has_acl_context = (
+            db is not None
+            and acl_user_email is not None
+            and acl_org_id is not None
+            and has_vector_sources
+        )
+        if has_acl_context:
+            access_control_op = AccessControlFilter(
+                db=db,
+                user_email=acl_user_email,
+                organization_id=acl_org_id,
+            )
+            if user_principal_override:
+                ctx.logger.info(
+                    f"[SearchFactory] Created AccessControlFilter for override user: "
+                    f"'{user_principal_override}'"
+                )
+
         return {
+            "access_control_filter": access_control_op,
             "query_expansion": (
                 QueryExpansion(providers=providers["expansion"]) if params["expand_query"] else None
             ),

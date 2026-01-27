@@ -23,6 +23,7 @@ def mock_context():
     context.emitter = AsyncMock()
     
     # Mock operations
+    context.access_control_filter = None
     context.query_expansion = None
     context.query_interpretation = None
     context.embed_query = None
