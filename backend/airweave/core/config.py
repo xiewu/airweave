@@ -175,6 +175,7 @@ class Settings(BaseSettings):
     STRIPE_TEAM_YEARLY: str = ""
     STRIPE_ENTERPRISE_MONTHLY: str = ""
     STRIPE_YEARLY_DISCOUNT_COUPON_ID: str = ""
+    STRIPE_TEST_CLOCK: Optional[str] = None  # Only for non-production testing via env var
 
     # Email settings - only for production Airweave instance
     RESEND_API_KEY: Optional[str] = None
