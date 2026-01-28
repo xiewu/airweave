@@ -402,13 +402,16 @@ if [[ -z $ACTION_RECREATE && -z $ACTION_RESTART ]]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Determine Services to Start
+# Determine Services to Start & Embedding Dimensions
 # -----------------------------------------------------------------------------
 USE_LOCAL_EMBEDDINGS=true
 USE_FRONTEND=true
 
-# Auto-detect OpenAI key to skip local embeddings
+# Detect available API keys
 openai_key=$(get_env_value "OPENAI_API_KEY")
+mistral_key=$(get_env_value "MISTRAL_API_KEY")
+
+# Auto-detect OpenAI key to skip local embeddings
 if [[ -n $openai_key && $openai_key != "your-api-key-here" ]]; then
     log_note "OpenAI detected — skipping local embeddings (~2GB)"
     USE_LOCAL_EMBEDDINGS=false
@@ -418,6 +421,26 @@ fi
 if [[ -n $SKIP_LOCAL_EMBEDDINGS ]]; then
     log_note "Skipping local embeddings (flag set)"
     USE_LOCAL_EMBEDDINGS=false
+fi
+
+# Set EMBEDDING_DIMENSIONS based on available providers (if not already set)
+# Priority: OpenAI (1536) > Mistral (1024) > Local (384)
+current_dim=$(get_env_value "EMBEDDING_DIMENSIONS")
+if [[ -z $current_dim ]]; then
+    if [[ -n $openai_key && $openai_key != "your-api-key-here" ]]; then
+        set_env_value "EMBEDDING_DIMENSIONS" "1536"
+        log_success "EMBEDDING_DIMENSIONS=1536 (OpenAI)"
+    elif [[ -n $mistral_key && $mistral_key != "your-api-key-here" ]]; then
+        set_env_value "EMBEDDING_DIMENSIONS" "1024"
+        log_success "EMBEDDING_DIMENSIONS=1024 (Mistral)"
+    elif [[ $USE_LOCAL_EMBEDDINGS == true ]]; then
+        set_env_value "EMBEDDING_DIMENSIONS" "384"
+        log_success "EMBEDDING_DIMENSIONS=384 (local)"
+    else
+        log_warning "No embedding provider configured"
+    fi
+else
+    log_success "EMBEDDING_DIMENSIONS=$current_dim (from .env)"
 fi
 
 if [[ -n $SKIP_FRONTEND ]]; then
