@@ -22,9 +22,28 @@ export function formatSearchResponse(searchResponse: SearchResponse, responseTyp
                     `**Result ${index + 1}${result.score ? ` (Score: ${result.score.toFixed(3)})` : ""}:**`
                 ];
 
+                // Add metadata if available
+                if (result.entity_id || result.name) {
+                    const metadata = [];
+                    if (result.entity_id) metadata.push(`ID: ${result.entity_id}`);
+                    if (result.name) metadata.push(`Name: ${result.name}`);
+                    parts.push(metadata.join(" | "));
+                }
+
                 // Extract content from various possible fields
-                const content = result.content || result.text || result.payload?.content || result.payload?.text || JSON.stringify(result, null, 2);
-                parts.push(content);
+                const content = result.textual_representation || 
+                               result.content || 
+                               result.text || 
+                               result.payload?.content || 
+                               result.payload?.text;
+                
+                if (content) {
+                    parts.push(content);
+                } else {
+                    // Fallback to stringified JSON, but truncate if too long
+                    const jsonStr = JSON.stringify(result, null, 2);
+                    parts.push(jsonStr.length > 500 ? jsonStr.substring(0, 500) + "..." : jsonStr);
+                }
 
                 return parts.join("\n");
             })

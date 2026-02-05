@@ -26,6 +26,7 @@ export interface SessionData {
     baseUrl: string;
     createdAt: number;
     lastAccessedAt: number;
+    initialized: boolean;  // Track if MCP initialize was called
     // Security: Client binding to prevent session hijacking
     clientIP?: string;
     userAgent?: string;

@@ -14,7 +14,11 @@ export class AirweaveClient {
     }
 
     async search(searchRequest: any): Promise<SearchResponse> {
-        console.log(`[${new Date().toISOString()}] AirweaveClient.search called with:`, JSON.stringify(searchRequest, null, 2));
+        try {
+            console.error(`[${new Date().toISOString()}] AirweaveClient.search called with:`, JSON.stringify(searchRequest, null, 2));
+        } catch (e) {
+            console.error(`[${new Date().toISOString()}] AirweaveClient.search called (params not serializable)`);
+        }
 
         // Mock mode for testing
         if (this.config.apiKey === 'test-key' && this.config.baseUrl.includes('localhost')) {
@@ -24,9 +28,9 @@ export class AirweaveClient {
         try {
             // Use the SDK's search method - it handles both basic and advanced parameters
             // The SDK will automatically use GET for basic params and POST for advanced
-            console.log(`[${new Date().toISOString()}] Calling SDK search with all params`);
+            console.error(`[${new Date().toISOString()}] Calling SDK search with all params`);
             const response = await this.client.collections.search(this.config.collection, searchRequest);
-            console.log(`[${new Date().toISOString()}] Search successful, got ${response.results?.length || 0} results`);
+            console.error(`[${new Date().toISOString()}] Search successful, got ${response.results?.length || 0} results`);
             return response;
         } catch (error: any) {
             // Handle SDK errors and convert to our error format
