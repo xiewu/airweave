@@ -155,12 +155,60 @@ class RunSyncActivity:
                 source_type=connection.short_name,
             )
 
+            # Track timing for stack trace dumps
+            heartbeat_start_time = time.time()
+            last_stack_dump_time = heartbeat_start_time
+            stack_dump_interval = 600  # 10 minutes
+
             try:
                 while True:
                     done, _ = await asyncio.wait({sync_task}, timeout=1)
                     if sync_task in done:
                         await sync_task
                         break
+
+                    current_time = time.time()
+                    elapsed_seconds = int(current_time - heartbeat_start_time)
+
+                    # Dump stack trace for long-running syncs (every 5 minutes after initial 5 minutes)
+                    if (
+                        elapsed_seconds > 600
+                        and (current_time - last_stack_dump_time) >= stack_dump_interval
+                    ):
+                        # Collect all thread/task stack traces
+                        stack_traces = []
+
+                        # Main thread stack
+                        for thread_id, frame in sys._current_frames().items():
+                            stack_traces.append(f"\n=== Thread {thread_id} ===")
+                            stack_traces.append("".join(traceback.format_stack(frame)))
+
+                        # All async tasks
+                        all_tasks = asyncio.all_tasks()
+                        stack_traces.append(f"\n=== Async Tasks ({len(all_tasks)} total) ===")
+                        for task in all_tasks:
+                            if not task.done():
+                                task_name = task.get_name()
+                                coro = task.get_coro()
+                                if hasattr(coro, "cr_frame") and coro.cr_frame:
+                                    frame = coro.cr_frame
+                                    stack_traces.append(f"\nTask: {task_name}")
+                                    stack_traces.append(
+                                        f"  at {frame.f_code.co_filename}:{frame.f_lineno} in {frame.f_code.co_name}"
+                                    )
+
+                        stack_trace_str = "".join(stack_traces)
+                        ctx.logger.debug(
+                            f"[STACK_TRACE_DUMP] sync={sync.id} sync_job={sync_job.id} elapsed={elapsed_seconds}s",
+                            extra={
+                                "elapsed_seconds": elapsed_seconds,
+                                "sync_id": str(sync.id),
+                                "sync_job_id": str(sync_job.id),
+                                "stack_traces": stack_trace_str,
+                            },
+                        )
+                        last_stack_dump_time = current_time
+
                     ctx.logger.debug("HEARTBEAT: Sync in progress")
                     activity.heartbeat("Sync in progress")
 
