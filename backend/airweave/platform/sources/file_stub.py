@@ -357,6 +357,7 @@ class ContentGenerator:
     config_class="FileStubConfig",
     labels=["Internal", "Testing"],
     supports_continuous=False,
+    internal=True,
 )
 class FileStubSource(BaseSource):
     """File stub source for testing document conversion pipelines.

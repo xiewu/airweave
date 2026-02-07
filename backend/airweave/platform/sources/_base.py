@@ -38,6 +38,7 @@ class BaseSource:
     _oauth_type: ClassVar[Optional[OAuthType]] = None
     _requires_byoc: ClassVar[bool] = False
     _auth_config_class: ClassVar[Optional[str]] = None
+    _internal: ClassVar[bool] = False
 
     def __init__(self):
         """Initialize the base source."""
@@ -151,6 +152,16 @@ class BaseSource:
     def cursor(self):
         """Get the cursor for this source."""
         return getattr(self, "_cursor", None)
+
+    @classmethod
+    def is_internal(cls) -> bool:
+        """Check if this is an internal/test source.
+
+        Internal sources are excluded from documentation generation and only
+        loaded when ENABLE_INTERNAL_SOURCES=true. Set via `internal=True`
+        in the @source decorator.
+        """
+        return cls._internal
 
     @classmethod
     def supports_auth_method(cls, method: AuthenticationMethod) -> bool:

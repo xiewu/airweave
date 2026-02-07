@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/airweave-mcp-search.svg)](https://www.npmjs.com/package/airweave-mcp-search)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
+[![Node.js >= 20](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org/)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--03--26-blue.svg)](https://modelcontextprotocol.io/)
 
 > **Official MCP server for Airweave** - Make your data searchable for AI assistants with semantic search, natural language queries, and advanced filtering.
@@ -11,7 +11,7 @@ An MCP (Model Context Protocol) server that provides comprehensive search capabi
 
 **Compatibility:**
 - MCP Protocol: 2025-03-26 (Streamable HTTP) + legacy stdio
-- Node.js: 18.0.0 or higher
+- Node.js: 20.0.0 or higher
 - Works with: Claude Desktop, Cursor, OpenAI Agent Builder, and any MCP-compatible client
 - Airweave API: v1.0+
 
@@ -197,7 +197,7 @@ cd airweave/mcp
 ```
 
 This script will:
-1. Check Node.js version (18+ required)
+1. Check Node.js version (20+ required)
 2. Install dependencies
 3. Build the TypeScript project
 4. Run tests

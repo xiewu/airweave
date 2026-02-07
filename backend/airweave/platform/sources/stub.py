@@ -488,6 +488,7 @@ class ContentGenerator:
     config_class="StubConfig",
     labels=["Internal", "Testing"],
     supports_continuous=False,
+    internal=True,
 )
 class StubSource(BaseSource):
     """Stub source connector for testing purposes.
