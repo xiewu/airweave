@@ -22,7 +22,7 @@ class TestDestinationConfig:
     def test_defaults(self):
         """Test default destination config values."""
         config = DestinationConfig()
-        assert config.skip_qdrant is False
+        assert config.skip_qdrant is True  # Qdrant deprecated, skipped by default
         assert config.skip_vespa is False  # Default: false (Vespa enabled in prod)
         assert config.target_destinations is None
         assert config.exclude_destinations is None
@@ -100,7 +100,7 @@ class TestSyncConfig:
             env_copy = {k: v for k, v in os.environ.items() if not k.startswith("SYNC_CONFIG__")}
             with patch.dict(os.environ, env_copy, clear=True):
                 config = SyncConfig()
-                assert config.destinations.skip_qdrant is False
+                assert config.destinations.skip_qdrant is True  # Qdrant deprecated
                 assert config.handlers.enable_vector_handlers is True
                 assert config.cursor.skip_load is False
                 assert config.behavior.replay_from_arf is False
@@ -108,7 +108,7 @@ class TestSyncConfig:
     def test_with_nested_configs(self):
         """Test SyncConfig with nested sub-configs."""
         config = SyncConfig(
-            destinations=DestinationConfig(skip_vespa=True),
+            destinations=DestinationConfig(skip_vespa=True, skip_qdrant=False),
             handlers=HandlerConfig(enable_postgres_handler=False),
         )
         assert config.destinations.skip_vespa is True
@@ -184,15 +184,9 @@ class TestSyncConfigPresets:
     def test_default_preset(self):
         """Test default() preset."""
         config = SyncConfig.default()
-        assert config.destinations.skip_qdrant is False
+        assert config.destinations.skip_qdrant is True  # Qdrant deprecated
         assert config.destinations.skip_vespa is False  # Default: false (Vespa enabled in prod)
         assert config.handlers.enable_vector_handlers is True
-
-    def test_qdrant_only_preset(self):
-        """Test qdrant_only() preset skips Vespa."""
-        config = SyncConfig.qdrant_only()
-        assert config.destinations.skip_qdrant is False
-        assert config.destinations.skip_vespa is True
 
     def test_vespa_only_preset(self):
         """Test vespa_only() preset skips Qdrant."""
@@ -240,9 +234,9 @@ class TestSyncConfigMerge:
     def test_merge_overwrites_values(self):
         """Test that merge overwrites specified values."""
         config = SyncConfig.default()
-        merged = config.merge_with({"destinations": {"skip_vespa": True}})
+        merged = config.merge_with({"destinations": {"skip_vespa": True, "skip_qdrant": False}})
         assert merged.destinations.skip_vespa is True
-        assert merged.destinations.skip_qdrant is False  # Preserved
+        assert merged.destinations.skip_qdrant is False
 
     def test_merge_deep_nested(self):
         """Test deep merge of nested values."""

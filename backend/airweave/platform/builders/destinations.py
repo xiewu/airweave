@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from airweave import crud, schemas
 from airweave.core import credentials
 from airweave.core.constants.reserved_ids import (
-    NATIVE_QDRANT_UUID,
     NATIVE_VESPA_UUID,
     RESERVED_TABLE_ENTITY_ID,
 )
@@ -125,9 +124,7 @@ class DestinationsContextBuilder:
             List of destination instances ready for deletion operations.
         """
         # Map native UUIDs to their creator methods
-        # TODO: Add other flexible destination building here for future Vespa deployments
         native_creators = {
-            NATIVE_QDRANT_UUID: cls._create_native_qdrant,
             NATIVE_VESPA_UUID: cls._create_native_vespa,
         }
 
@@ -206,10 +203,6 @@ class DestinationsContextBuilder:
         logger: ContextualLogger,
     ) -> Optional[BaseDestination]:
         """Create a single destination instance."""
-        # Special case: Native Qdrant
-        if destination_connection_id == NATIVE_QDRANT_UUID:
-            return await cls._create_native_qdrant(db, collection, logger)
-
         # Special case: Native Vespa
         if destination_connection_id == NATIVE_VESPA_UUID:
             return await cls._create_native_vespa(db, collection, logger)
@@ -401,9 +394,7 @@ class DestinationsContextBuilder:
             exclusions.update(execution_config.destinations.exclude_destinations)
 
         # Add native vector DB exclusions from boolean flags
-        if execution_config.destinations.skip_qdrant:
-            exclusions.add(NATIVE_QDRANT_UUID)
-            logger.info("Excluding native Qdrant (skip_qdrant=True)")
+        # Note: skip_qdrant is always True (Qdrant deprecated), no UUID to exclude
 
         if execution_config.destinations.skip_vespa:
             exclusions.add(NATIVE_VESPA_UUID)

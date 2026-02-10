@@ -45,18 +45,19 @@ services:
       timeout: 10s
       retries: 3
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    command: bash -c "apt-get update && apt-get install -y curl && ./entrypoint.sh" # we need to install curl to check health
-    ports:
-      - "9333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:6333/healthz" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # qdrant: DEPRECATED -- Vespa is the sole vector database
+  # qdrant:
+  #   image: qdrant/qdrant:latest
+  #   command: bash -c "apt-get update && apt-get install -y curl && ./entrypoint.sh"
+  #   ports:
+  #     - "9333:6333"
+  #   volumes:
+  #     - qdrant_data:/qdrant/storage
+  #   healthcheck:
+  #     test: [ "CMD", "curl", "-f", "http://localhost:6333/healthz" ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
   svix:
     image: svix/svix-server
@@ -89,8 +90,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      qdrant:
-        condition: service_healthy
       svix:
         condition: service_healthy
 
@@ -98,8 +97,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://airweave:airweave1234!@postgres:5432/airweave
       - REDIS_HOST=redis
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
+      - SYNC_CONFIG__DESTINATIONS__SKIP_QDRANT=true
       - TESTING=true
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432

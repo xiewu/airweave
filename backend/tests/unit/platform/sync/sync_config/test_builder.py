@@ -26,7 +26,7 @@ class TestSyncConfigBuilderBasic:
         """Test build with no overrides returns schema defaults."""
         with _clean_env():
             config = SyncConfigBuilder.build()
-            assert config.destinations.skip_qdrant is False
+            assert config.destinations.skip_qdrant is True  # Qdrant deprecated
             assert config.destinations.skip_vespa is False  # Default: false (Vespa enabled in prod)
             assert config.handlers.enable_vector_handlers is True
             assert config.cursor.skip_load is False
@@ -61,23 +61,23 @@ class TestSyncConfigBuilderLayerPrecedence:
         """Test that collection overrides beat env."""
         with patch.dict(
             os.environ,
-            {"SYNC_CONFIG__DESTINATIONS__SKIP_VESPA": "true"},
+            {"SYNC_CONFIG__DESTINATIONS__SKIP_QDRANT": "true"},
             clear=False,
         ):
             config = SyncConfigBuilder.build(
-                collection_overrides=SyncConfig(destinations=DestinationConfig(skip_vespa=False))
+                collection_overrides=SyncConfig(destinations=DestinationConfig(skip_qdrant=False))
             )
-            assert config.destinations.skip_vespa is False
+            assert config.destinations.skip_qdrant is False
 
     def test_env_overrides_beat_schema(self):
         """Test that env overrides beat schema defaults."""
         with patch.dict(
             os.environ,
-            {"SYNC_CONFIG__DESTINATIONS__SKIP_VESPA": "true"},
+            {"SYNC_CONFIG__BEHAVIOR__SKIP_GUARDRAILS": "true"},
             clear=False,
         ):
             config = SyncConfigBuilder.build()
-            assert config.destinations.skip_vespa is True
+            assert config.behavior.skip_guardrails is True
 
     def test_full_layer_chain(self):
         """Test all layers together with different fields."""
@@ -116,7 +116,9 @@ class TestSyncConfigBuilderPartialOverrides:
         """Test that overriding one section preserves other sections."""
         with _clean_env():
             config = SyncConfigBuilder.build(
-                job_overrides=SyncConfig(destinations=DestinationConfig(skip_vespa=True))
+                job_overrides=SyncConfig(
+                    destinations=DestinationConfig(skip_vespa=True, skip_qdrant=False)
+                )
             )
             assert config.destinations.skip_vespa is True
             assert config.handlers.enable_vector_handlers is True  # Other section default
@@ -127,7 +129,7 @@ class TestSyncConfigBuilderPartialOverrides:
         with _clean_env():
             config = SyncConfigBuilder.build(
                 job_overrides=SyncConfig(
-                    destinations=DestinationConfig(skip_vespa=True),
+                    destinations=DestinationConfig(skip_vespa=True, skip_qdrant=False),
                     handlers=HandlerConfig(enable_postgres_handler=False),
                 )
             )

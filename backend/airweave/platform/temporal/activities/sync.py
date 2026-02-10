@@ -205,17 +205,45 @@ class RunSyncActivity:
                                     loc = f"{frame.f_code.co_filename}:{frame.f_lineno}"
                                     stack_traces.append(f"  at {loc} in {frame.f_code.co_name}")
 
-                        stack_trace_str = "".join(stack_traces)
+                        # Split into threads vs async tasks to avoid
+                        # Azure Log Analytics 16KB field truncation
+                        thread_parts = []
+                        async_parts = []
+                        in_async = False
+                        for trace in stack_traces:
+                            if "=== Async Tasks" in trace:
+                                in_async = True
+                            (async_parts if in_async else thread_parts).append(trace)
+
+                        base_extra = {
+                            "elapsed_seconds": elapsed_seconds,
+                            "sync_id": str(sync.id),
+                            "sync_job_id": str(sync_job.id),
+                        }
+
                         ctx.logger.debug(
                             f"[STACK_TRACE_DUMP] sync={sync.id} "
-                            f"sync_job={sync_job.id} elapsed={elapsed_seconds}s",
-                            extra={
-                                "elapsed_seconds": elapsed_seconds,
-                                "sync_id": str(sync.id),
-                                "sync_job_id": str(sync_job.id),
-                                "stack_traces": stack_trace_str,
-                            },
+                            f"sync_job={sync_job.id} elapsed={elapsed_seconds}s "
+                            f"part=threads",
+                            extra={**base_extra, "stack_traces": "".join(thread_parts)},
                         )
+
+                        async_str = "".join(async_parts)
+                        chunk_size = 12000
+                        chunk_idx = 0
+                        for i in range(0, max(len(async_str), 1), chunk_size):
+                            chunk_idx += 1
+                            ctx.logger.debug(
+                                f"[STACK_TRACE_DUMP] sync={sync.id} "
+                                f"sync_job={sync_job.id} elapsed={elapsed_seconds}s "
+                                f"part=async_tasks chunk={chunk_idx}",
+                                extra={
+                                    **base_extra,
+                                    "stack_traces": async_str[i : i + chunk_size],
+                                    "chunk": chunk_idx,
+                                },
+                            )
+
                         last_stack_dump_time = current_time
 
                     ctx.logger.debug("HEARTBEAT: Sync in progress")

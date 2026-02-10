@@ -64,11 +64,11 @@ services:
       # Override any localhost references for container networking
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
       - TEXT2VEC_INFERENCE_URL=http://text2vec-transformers:8080
       - VESPA_URL=http://vespa
       - VESPA_PORT=8081
+      # Qdrant deprecated -- skip by default
+      - SYNC_CONFIG__DESTINATIONS__SKIP_QDRANT=true
       # Environment configuration (can be overridden in .env)
       - ENVIRONMENT=${ENVIRONMENT:-local}
       - LOCAL_DEVELOPMENT=${LOCAL_DEVELOPMENT:-true}
@@ -86,8 +86,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      qdrant:
         condition: service_healthy
       svix:
         condition: service_healthy
@@ -141,20 +139,22 @@ services:
       retries: 3
     restart: on-failure
 
-  qdrant:
-    container_name: airweave-qdrant
-    image: qdrant/qdrant:latest
-    command: bash -c "apt-get update && apt-get install -y curl && ./entrypoint.sh" # we need to install curl to check health
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:6333/healthz" ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: on-failure
+  # qdrant: DEPRECATED -- Vespa is the sole vector database
+  # To re-enable for rollback, uncomment and add depends_on to backend/worker
+  # qdrant:
+  #   container_name: airweave-qdrant
+  #   image: qdrant/qdrant:latest
+  #   command: bash -c "apt-get update && apt-get install -y curl && ./entrypoint.sh"
+  #   ports:
+  #     - "6333:6333"
+  #   volumes:
+  #     - qdrant_data:/qdrant/storage
+  #   healthcheck:
+  #     test: [ "CMD", "curl", "-f", "http://localhost:6333/healthz" ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+  #   restart: on-failure
 
   temporal:
     container_name: airweave-temporal
@@ -205,11 +205,11 @@ services:
       # Override any localhost references for container networking
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
       - TEXT2VEC_INFERENCE_URL=http://text2vec-transformers:8080
       - VESPA_URL=http://vespa
       - VESPA_PORT=8081
+      # Qdrant deprecated -- skip by default
+      - SYNC_CONFIG__DESTINATIONS__SKIP_QDRANT=true
       # Environment configuration (can be overridden in .env)
       - ENVIRONMENT=${ENVIRONMENT:-local}
       - LOCAL_DEVELOPMENT=${LOCAL_DEVELOPMENT:-true}

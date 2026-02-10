@@ -12,6 +12,7 @@ import shutil
 from typing import TYPE_CHECKING, Callable, Optional, Tuple
 from uuid import UUID, uuid4
 
+import aiofiles
 import httpx
 from tenacity import retry, stop_after_attempt
 
@@ -180,9 +181,9 @@ class FileService:
             ) as response:
                 response.raise_for_status()
                 os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-                with open(temp_path, "wb") as f:
+                async with aiofiles.open(temp_path, "wb") as f:
                     async for chunk in response.aiter_bytes():
-                        f.write(chunk)
+                        await f.write(chunk)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 retry_after = e.response.headers.get("Retry-After", "unknown")
@@ -285,8 +286,8 @@ class FileService:
         temp_path = f"{self.base_temp_dir}/{file_uuid}-{safe_filename}"
 
         os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-        with open(temp_path, "wb") as f:
-            f.write(content)
+        async with aiofiles.open(temp_path, "wb") as f:
+            await f.write(content)
 
         logger.debug(f"Restored file from ARF to {temp_path}")
         return temp_path
@@ -348,8 +349,8 @@ class FileService:
 
         try:
             os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-            with open(temp_path, "wb") as f:
-                f.write(content)
+            async with aiofiles.open(temp_path, "wb") as f:
+                await f.write(content)
 
             logger.debug(f"Saved file to: {temp_path}")
             entity.local_path = temp_path
