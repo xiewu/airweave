@@ -41,8 +41,8 @@ class FileService:
     - Cleanup temp directory after sync
     """
 
-    # Maximum file size we'll download (1GB)
-    MAX_FILE_SIZE_BYTES = 1073741824
+    # Maximum file size we'll download (200MB)
+    MAX_FILE_SIZE_BYTES = 209715200
 
     def __init__(
         self,
@@ -148,7 +148,7 @@ class FileService:
                         size_bytes = int(content_length)
                         if size_bytes > self.MAX_FILE_SIZE_BYTES:
                             size_mb = size_bytes / (1024 * 1024)
-                            return False, f"File too large: {size_mb:.1f}MB (max 1GB)"
+                            return False, f"File too large: {size_mb:.1f}MB (max 200MB)"
 
                 except (httpx.HTTPError, ValueError) as e:
                     logger.debug(
@@ -180,9 +180,28 @@ class FileService:
                 "GET", url, headers=headers, follow_redirects=True
             ) as response:
                 response.raise_for_status()
+
+                # Check Content-Length header before reading body
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > self.MAX_FILE_SIZE_BYTES:
+                    size_mb = int(content_length) / (1024 * 1024)
+                    max_mb = self.MAX_FILE_SIZE_BYTES // (1024 * 1024)
+                    raise FileSkippedException(
+                        reason=f"File too large: {size_mb:.1f}MB (max {max_mb}MB)",
+                        filename=temp_path,
+                    )
+
                 os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+                bytes_written = 0
                 async with aiofiles.open(temp_path, "wb") as f:
                     async for chunk in response.aiter_bytes():
+                        bytes_written += len(chunk)
+                        if bytes_written > self.MAX_FILE_SIZE_BYTES:
+                            max_mb = self.MAX_FILE_SIZE_BYTES // (1024 * 1024)
+                            raise FileSkippedException(
+                                reason=f"File exceeded {max_mb}MB during download",
+                                filename=temp_path,
+                            )
                         await f.write(chunk)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
