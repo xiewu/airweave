@@ -213,16 +213,6 @@ class WeaviateAuthConfig(AuthConfig):
     api_key: str = Field(title="API Key", description="The API key for the Weaviate cluster")
 
 
-class QdrantAuthConfig(AuthConfig):
-    """Qdrant authentication credentials schema."""
-
-    url: str = Field(title="URL", description="The URL of the Qdrant service")
-    api_key: str = Field(
-        title="API Key",
-        description="The API key for the Qdrant service (if required)",
-    )
-
-
 class Neo4jAuthConfig(AuthConfig):
     """Neo4j authentication credentials schema."""
 
@@ -523,12 +513,6 @@ class PipedriveAuthConfig(AuthConfig):
         if not v or not v.strip():
             raise ValueError("API token is required")
         return v.strip()
-
-
-class ExcelAuthConfig(OAuth2WithRefreshAuthConfig):
-    """Microsoft Excel authentication credentials schema."""
-
-    # Inherits refresh_token and access_token from OAuth2WithRefreshAuthConfig
 
 
 class OneNoteAuthConfig(OAuth2WithRefreshAuthConfig):

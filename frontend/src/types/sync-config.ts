@@ -4,7 +4,6 @@
  */
 
 export interface DestinationConfig {
-    skip_qdrant?: boolean;
     skip_vespa?: boolean;
     target_destinations?: string[] | null;
     exclude_destinations?: string[] | null;
@@ -52,7 +51,7 @@ export const SYNC_PRESETS: PresetDefinition[] = [
         label: 'Default (Normal Sync)',
         description: 'Standard sync to Vespa with all handlers enabled',
         config: {
-            destinations: { skip_qdrant: true, skip_vespa: false },
+            destinations: { skip_vespa: false },
             handlers: { enable_vector_handlers: true, enable_raw_data_handler: true, enable_postgres_handler: true },
             cursor: { skip_load: false, skip_updates: false },
             behavior: { skip_hash_comparison: false, replay_from_arf: false },
@@ -83,7 +82,7 @@ export const SYNC_PRESETS: PresetDefinition[] = [
         label: 'Vespa Only',
         description: 'Sync to Vespa only (default destination)',
         config: {
-            destinations: { skip_qdrant: true, skip_vespa: false },
+            destinations: { skip_vespa: false },
         },
     },
     {

@@ -26,7 +26,6 @@ class TestSyncConfigBuilderBasic:
         """Test build with no overrides returns schema defaults."""
         with _clean_env():
             config = SyncConfigBuilder.build()
-            assert config.destinations.skip_qdrant is True  # Qdrant deprecated
             assert config.destinations.skip_vespa is False  # Default: false (Vespa enabled in prod)
             assert config.handlers.enable_vector_handlers is True
             assert config.cursor.skip_load is False
@@ -44,10 +43,10 @@ class TestSyncConfigBuilderLayerPrecedence:
     def test_job_overrides_beat_sync(self):
         """Test that job overrides beat sync overrides."""
         config = SyncConfigBuilder.build(
-            sync_overrides=SyncConfig(destinations=DestinationConfig(skip_qdrant=False)),
-            job_overrides=SyncConfig(destinations=DestinationConfig(skip_qdrant=True)),
+            sync_overrides=SyncConfig(behavior=BehaviorConfig(skip_hash_comparison=False)),
+            job_overrides=SyncConfig(behavior=BehaviorConfig(skip_hash_comparison=True)),
         )
-        assert config.destinations.skip_qdrant is True
+        assert config.behavior.skip_hash_comparison is True
 
     def test_sync_overrides_beat_collection(self):
         """Test that sync overrides beat collection overrides."""
@@ -61,13 +60,13 @@ class TestSyncConfigBuilderLayerPrecedence:
         """Test that collection overrides beat env."""
         with patch.dict(
             os.environ,
-            {"SYNC_CONFIG__DESTINATIONS__SKIP_QDRANT": "true"},
+            {"SYNC_CONFIG__BEHAVIOR__SKIP_GUARDRAILS": "true"},
             clear=False,
         ):
             config = SyncConfigBuilder.build(
-                collection_overrides=SyncConfig(destinations=DestinationConfig(skip_qdrant=False))
+                collection_overrides=SyncConfig(behavior=BehaviorConfig(skip_guardrails=False))
             )
-            assert config.destinations.skip_qdrant is False
+            assert config.behavior.skip_guardrails is False
 
     def test_env_overrides_beat_schema(self):
         """Test that env overrides beat schema defaults."""
@@ -81,11 +80,7 @@ class TestSyncConfigBuilderLayerPrecedence:
 
     def test_full_layer_chain(self):
         """Test all layers together with different fields."""
-        with patch.dict(
-            os.environ,
-            {"SYNC_CONFIG__DESTINATIONS__SKIP_QDRANT": "true"},
-            clear=False,
-        ):
+        with _clean_env():
             config = SyncConfigBuilder.build(
                 collection_overrides=SyncConfig(
                     handlers=HandlerConfig(enable_vector_handlers=False)
@@ -94,7 +89,6 @@ class TestSyncConfigBuilderLayerPrecedence:
                 job_overrides=SyncConfig(behavior=BehaviorConfig(replay_from_arf=True)),
             )
 
-            assert config.destinations.skip_qdrant is True  # from env
             assert config.handlers.enable_vector_handlers is False  # from collection
             assert config.cursor.skip_load is True  # from sync
             assert config.behavior.replay_from_arf is True  # from job
@@ -107,20 +101,20 @@ class TestSyncConfigBuilderPartialOverrides:
         """Test that overriding one field preserves others in same section."""
         with _clean_env():
             config = SyncConfigBuilder.build(
-                job_overrides=SyncConfig(destinations=DestinationConfig(skip_qdrant=True))
+                job_overrides=SyncConfig(handlers=HandlerConfig(enable_postgres_handler=False))
             )
-            assert config.destinations.skip_qdrant is True
-            assert config.destinations.skip_vespa is False  # Preserved default (false - Vespa enabled)
+            assert config.handlers.enable_postgres_handler is False
+            assert config.handlers.enable_vector_handlers is True  # Preserved default
 
     def test_partial_override_preserves_other_sections(self):
         """Test that overriding one section preserves other sections."""
         with _clean_env():
             config = SyncConfigBuilder.build(
                 job_overrides=SyncConfig(
-                    destinations=DestinationConfig(skip_vespa=True, skip_qdrant=False)
+                    behavior=BehaviorConfig(skip_hash_comparison=True)
                 )
             )
-            assert config.destinations.skip_vespa is True
+            assert config.behavior.skip_hash_comparison is True
             assert config.handlers.enable_vector_handlers is True  # Other section default
             assert config.cursor.skip_load is False  # Other section default
 
@@ -129,11 +123,11 @@ class TestSyncConfigBuilderPartialOverrides:
         with _clean_env():
             config = SyncConfigBuilder.build(
                 job_overrides=SyncConfig(
-                    destinations=DestinationConfig(skip_vespa=True, skip_qdrant=False),
+                    behavior=BehaviorConfig(skip_hash_comparison=True),
                     handlers=HandlerConfig(enable_postgres_handler=False),
                 )
             )
-            assert config.destinations.skip_vespa is True
+            assert config.behavior.skip_hash_comparison is True
             assert config.handlers.enable_postgres_handler is False
             assert config.cursor.skip_load is False  # Untouched
 
@@ -145,14 +139,13 @@ class TestSyncConfigBuilderFromDB:
         """Test loading from DB JSONB column (validate dict into SyncConfig)."""
         # Simulating: SyncConfig(**collection.sync_config_json)
         db_json = {
-            "destinations": {"skip_vespa": True, "skip_qdrant": False},
             "handlers": {"enable_vector_handlers": False},
+            "behavior": {"skip_hash_comparison": True},
         }
 
         with _clean_env():
             config = SyncConfigBuilder.build(
                 collection_overrides=SyncConfig(**db_json)
             )
-            assert config.destinations.skip_vespa is True
-            assert config.destinations.skip_qdrant is False
             assert config.handlers.enable_vector_handlers is False
+            assert config.behavior.skip_hash_comparison is True

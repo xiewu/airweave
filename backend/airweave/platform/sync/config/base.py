@@ -15,7 +15,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class DestinationConfig(BaseModel):
     """Controls where entities are written."""
 
-    skip_qdrant: bool = Field(True, description="Skip writing to native Qdrant (deprecated)")
     skip_vespa: bool = Field(False, description="Skip writing to native Vespa")
     target_destinations: Optional[List[UUID]] = Field(
         None, description="If set, ONLY write to these destination UUIDs"
@@ -54,7 +53,6 @@ class SyncConfig(BaseSettings):
     """Sync configuration with automatic env var loading.
 
     Env vars use double underscore as delimiter:
-        SYNC_CONFIG__DESTINATIONS__SKIP_QDRANT=true
         SYNC_CONFIG__HANDLERS__ENABLE_VECTOR_HANDLERS=false
     """
 
@@ -72,11 +70,11 @@ class SyncConfig(BaseSettings):
     @model_validator(mode="after")
     def validate_config_logic(self):
         """Validate that config combinations make sense."""
-        # At least one native vector DB must be enabled (Vespa is now the primary)
-        if self.destinations.skip_vespa and self.destinations.skip_qdrant:
+        # Vespa must be enabled (sole vector database)
+        if self.destinations.skip_vespa:
             raise ValueError(
-                "Invalid config: skip_vespa is True and Qdrant is deprecated. "
-                "At least one vector database must be enabled."
+                "Invalid config: skip_vespa is True. "
+                "Vespa is the only vector database and must be enabled."
             )
 
         if self.destinations.target_destinations and self.destinations.exclude_destinations:
@@ -123,7 +121,7 @@ class SyncConfig(BaseSettings):
     @classmethod
     def vespa_only(cls) -> "SyncConfig":
         """Write to Vespa only (default since Qdrant deprecation)."""
-        return cls(destinations=DestinationConfig(skip_qdrant=True, skip_vespa=False))
+        return cls(destinations=DestinationConfig(skip_vespa=False))
 
     @classmethod
     def arf_capture_only(cls) -> "SyncConfig":

@@ -119,7 +119,7 @@ results = client.collections.search(
 
 - **Frontend**: [React/TypeScript](https://react.dev/) with [ShadCN](https://ui.shadcn.com/)
 - **Backend**: [FastAPI](https://fastapi.tiangolo.com/) (Python)
-- **Databases**: [PostgreSQL](https://www.postgresql.org/) (metadata), [Qdrant](https://qdrant.tech/) (vectors)
+- **Databases**: [PostgreSQL](https://www.postgresql.org/) (metadata), [Vespa](https://vespa.ai/) (vectors)
 - **Workers**: [Temporal](https://temporal.io/) (orchestration), [Redis](https://redis.io/) (pub/sub)
 - **Deployment**: [Docker Compose](https://docs.docker.com/compose/) (dev), [Kubernetes](https://kubernetes.io/) (prod)
 

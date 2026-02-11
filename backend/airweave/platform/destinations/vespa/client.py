@@ -387,7 +387,7 @@ class VespaClient:
         """Convert Vespa hits to AirweaveSearchResult objects.
 
         Transforms Vespa's flat field structure into the unified AirweaveSearchResult
-        format that matches what Qdrant returns.
+        format.
 
         Args:
             hits: List of Vespa hit dictionaries

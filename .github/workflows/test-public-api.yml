@@ -87,7 +87,6 @@ jobs:
           echo "Note: text2vec-transformers disabled via docker-compose profile (backend uses OpenAI)"
           docker pull postgres:16 &
           docker pull redis:7-alpine &
-          docker pull qdrant/qdrant:latest &
           docker pull temporalio/auto-setup:1.24.2 &
           docker pull temporalio/ui:2.26.2 &
           docker pull vespaengine/vespa:8 &

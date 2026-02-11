@@ -1,7 +1,7 @@
 """Destinations context builder for sync operations.
 
 Handles destination creation with:
-- Native destinations (Qdrant, Vespa) using settings
+- Native destinations (Vespa) using settings
 - Custom destinations with credentials
 - Entity definition map loading
 """
@@ -218,39 +218,6 @@ class DestinationsContextBuilder:
         )
 
     @classmethod
-    async def _create_native_qdrant(
-        cls,
-        db: AsyncSession,
-        collection: schemas.Collection,
-        logger: ContextualLogger,
-    ) -> Optional[BaseDestination]:
-        """Create native Qdrant destination."""
-        logger.info("Using native Qdrant destination (settings-based)")
-        destination_model = await crud.destination.get_by_short_name(db, "qdrant")
-        if not destination_model:
-            logger.warning("Qdrant destination model not found")
-            return None
-
-        destination_schema = schemas.Destination.model_validate(destination_model)
-        destination_class = resource_locator.get_destination(destination_schema)
-
-        # Fail-fast: vector_size must be set
-        if collection.vector_size is None:
-            raise ValueError(f"Collection {collection.id} has no vector_size set.")
-
-        destination = await destination_class.create(
-            credentials=None,
-            config=None,
-            collection_id=collection.id,
-            organization_id=collection.organization_id,
-            vector_size=collection.vector_size,
-            logger=logger,
-        )
-
-        logger.info("Created native Qdrant destination")
-        return destination
-
-    @classmethod
     async def _create_native_vespa(
         cls,
         db: AsyncSession,
@@ -374,7 +341,7 @@ class DestinationsContextBuilder:
 
         Priority order:
         1. target_destinations (explicit whitelist) - highest priority
-        2. exclude_destinations + skip_qdrant/skip_vespa (combined exclusions)
+        2. exclude_destinations + skip_vespa (combined exclusions)
         """
         if not execution_config:
             return destination_ids
@@ -394,8 +361,6 @@ class DestinationsContextBuilder:
             exclusions.update(execution_config.destinations.exclude_destinations)
 
         # Add native vector DB exclusions from boolean flags
-        # Note: skip_qdrant is always True (Qdrant deprecated), no UUID to exclude
-
         if execution_config.destinations.skip_vespa:
             exclusions.add(NATIVE_VESPA_UUID)
             logger.info("Excluding native Vespa (skip_vespa=True)")
