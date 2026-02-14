@@ -19,6 +19,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 from airweave.platform.access_control.schemas import MembershipTuple
 from airweave.platform.configs.auth import SharePoint2019V2AuthConfig
+from airweave.platform.configs.config import SharePoint2019V2Config
 from airweave.platform.decorators import source
 from airweave.platform.entities._base import BaseEntity, Breadcrumb
 from airweave.platform.sources._base import BaseSource
@@ -44,8 +45,8 @@ from airweave.schemas.source_connection import AuthenticationMethod
     short_name="sharepoint2019v2",
     auth_methods=[AuthenticationMethod.DIRECT],
     oauth_type=None,
-    auth_config_class="SharePoint2019V2AuthConfig",
-    config_class="SharePoint2019V2Config",
+    auth_config_class=SharePoint2019V2AuthConfig,
+    config_class=SharePoint2019V2Config,
     supports_continuous=False,
     supports_access_control=True,  # Enable access control sync
     feature_flag="sharepoint_2019_v2",  # Requires SHAREPOINT_2019_V2 feature flag

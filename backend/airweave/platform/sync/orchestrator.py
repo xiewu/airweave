@@ -192,7 +192,7 @@ class SyncOrchestrator:
     async def _process_entities(self) -> None:  # noqa: C901
         """Process entities using micro-batching with bounded inner concurrency."""
         self.sync_context.logger.info(
-            f"Starting pull-based processing from source {self.sync_context.source_instance._name} "
+            f"Starting pull-based processing from source {self.sync_context.source_instance.source_name} "
             f"(max workers: {self.worker_pool.max_workers}, "
             f"batch_size: {self.batch_size}, max_batch_latency_ms: {self.max_batch_latency_ms})"
         )
@@ -430,7 +430,7 @@ class SyncOrchestrator:
 
         # Check if source supports continuous/incremental sync (class attribute)
         source_class = type(self.sync_context.source_instance)
-        source_supports_continuous = getattr(source_class, "_supports_continuous", False)
+        source_supports_continuous = getattr(source_class, "supports_continuous", False)
 
         self.sync_context.logger.debug(
             f"Orphan cleanup check: has_cursor_data={has_cursor_data}, "
@@ -475,7 +475,7 @@ class SyncOrchestrator:
 
     def _source_supports_access_control(self) -> bool:
         """Check if the source supports access control membership syncing."""
-        return getattr(self.sync_context.source_instance, "_supports_access_control", False)
+        return getattr(self.sync_context.source_instance, "supports_access_control", False)
 
     async def _process_access_control_memberships(self) -> None:
         """Process access control memberships from the source.

@@ -400,7 +400,7 @@ class EntityPipeline:
             if entity.airweave_system_metadata is None:
                 entity.airweave_system_metadata = AirweaveSystemMetadata()
 
-            entity.airweave_system_metadata.source_name = sync_context.source_instance._short_name
+            entity.airweave_system_metadata.source_name = sync_context.source_instance.short_name
             entity.airweave_system_metadata.entity_type = entity.__class__.__name__
             entity.airweave_system_metadata.sync_id = sync_context.sync.id
             entity.airweave_system_metadata.sync_job_id = sync_context.sync_job.id

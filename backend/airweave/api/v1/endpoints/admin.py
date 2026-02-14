@@ -1362,8 +1362,8 @@ async def _build_admin_search_context(
     has_vector_sources = await factory._has_vector_sources(db, collection, ctx)
 
     # Determine destination capabilities
-    requires_embedding = getattr(destination, "_requires_client_embedding", True)
-    supports_temporal = getattr(destination, "_supports_temporal_relevance", True)
+    requires_embedding = getattr(destination, "requires_client_embedding", True)
+    supports_temporal = getattr(destination, "supports_temporal_relevance", True)
 
     ctx.logger.info(
         f"[AdminSearch] Destination: {destination.__class__.__name__}, "
