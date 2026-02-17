@@ -15,10 +15,12 @@ from typing import Any
 
 from airweave.core.protocols import (
     CircuitBreaker,
+    EndpointVerifier,
     EventBus,
     OcrProvider,
     WebhookAdmin,
     WebhookPublisher,
+    WebhookServiceProtocol,
 )
 from airweave.domains.sources.protocols import SourceServiceProtocol
 
@@ -42,6 +44,8 @@ class Container:
             webhook_admin=FakeWebhookAdmin(),
             circuit_breaker=FakeCircuitBreaker(),
             ocr_provider=FakeOcrProvider(),
+            endpoint_verifier=FakeEndpointVerifier(),
+            webhook_service=FakeWebhookService(),
         )
 
         # FastAPI endpoints: use Inject() to pull individual protocols
@@ -53,9 +57,11 @@ class Container:
     # Event bus for domain event fan-out
     event_bus: EventBus
 
-    # Webhook protocols (Svix-backed)
-    webhook_publisher: WebhookPublisher  # Internal: publish sync events
-    webhook_admin: WebhookAdmin  # External API: subscriptions + history
+    # Webhook protocols
+    webhook_publisher: WebhookPublisher
+    webhook_admin: WebhookAdmin
+    endpoint_verifier: EndpointVerifier
+    webhook_service: WebhookServiceProtocol
 
     # Circuit breaker for provider failover
     circuit_breaker: CircuitBreaker

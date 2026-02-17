@@ -5,6 +5,7 @@ All Svix SDK types are converted to domain types at the boundary.
 WebhookAdmin methods raise WebhooksError on failure.
 """
 
+import asyncio
 import logging
 import time
 import uuid
@@ -84,6 +85,19 @@ def _raise_from_exception(e: Exception, context: str = "") -> None:
         messages = [err.msg for err in e.detail] if e.detail else ["Validation error"]
         raise WebhooksError(f"{prefix}{'; '.join(messages)}", 422) from e
     raise WebhooksError(f"{prefix}{str(e)}", 500) from e
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """Check if an exception is a transient error worth retrying.
+
+    Returns True for connection errors and Svix 5xx responses.
+    Returns False for validation errors and other non-recoverable failures.
+    """
+    if isinstance(exc, (ConnectionError, OSError, TimeoutError)):
+        return True
+    if isinstance(exc, SvixHttpError):
+        return exc.status_code is not None and exc.status_code >= 500
+    return False
 
 
 def _auto_create_org(method: Callable[..., T]) -> Callable[..., T]:
@@ -182,28 +196,76 @@ class SvixAdapter(WebhookPublisher, WebhookAdmin):
         """Publish a domain event to webhook subscribers.
 
         Serializes the event to a flat JSON dict for Svix delivery.
+        Retries up to 3 times on transient errors (connection failures,
+        Svix 5xx) with exponential backoff (0s, 1s, 2s).
         Wraps infrastructure errors in WebhookPublishError so the event
-        bus sees a domain exception — never raw Svix/HTTP internals.
+        bus sees a domain exception, never raw Svix/HTTP internals.
         """
         event_type = event.event_type.value
-        try:
-            payload = event.model_dump(mode="json")
-            await self._publish_internal(event.organization_id, event_type, payload)
-            logger.info(f"Published webhook event '{event_type}' for org {event.organization_id}")
-        except Exception as exc:
-            raise WebhookPublishError(event_type, exc) from exc
+        payload = event.model_dump(mode="json")
+
+        max_retries = 3
+        retry_delays = [0, 1, 2]
+
+        for attempt in range(max_retries):
+            try:
+                await self._publish_internal(event.organization_id, event_type, payload)
+                logger.info(
+                    f"Published webhook event '{event_type}' for org {event.organization_id}"
+                )
+                return
+            except Exception as exc:
+                is_last_attempt = attempt == max_retries - 1
+                if not _is_transient_error(exc) or is_last_attempt:
+                    raise WebhookPublishError(event_type, exc) from exc
+                delay = retry_delays[attempt]
+                logger.warning(
+                    f"Transient Svix error publishing '{event_type}' "
+                    f"(attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {exc}"
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
 
     @_auto_create_org
     async def _publish_internal(self, org_id: uuid.UUID, event_type: str, payload: dict) -> None:
-        await self._svix.message.create(
-            str(org_id),
-            MessageIn(
-                event_type=event_type,
-                channels=[event_type],
-                event_id=str(uuid.uuid4()),
-                payload=payload,
-            ),
+        event_id = str(uuid.uuid4())
+        print(
+            f"[SVIX PRE-CREATE] event_type={event_type} org_id={org_id} "
+            f"event_id={event_id} svix_url={settings.SVIX_URL}"
         )
+        try:
+            result = await self._svix.message.create(
+                str(org_id),
+                MessageIn(
+                    event_type=event_type,
+                    channels=[event_type],
+                    event_id=event_id,
+                    payload=payload,
+                ),
+            )
+            print(
+                f"[SVIX POST-CREATE] msg_id={result.id} event_type={event_type} "
+                f"org_id={org_id} channels={result.channels}"
+            )
+        except Exception as exc:
+            print(
+                f"[SVIX CREATE FAILED] event_type={event_type} org_id={org_id} "
+                f"event_id={event_id} error={exc!r}"
+            )
+            raise
+
+        # Verify the message is queryable immediately
+        try:
+            msgs = await self._svix.message.list(
+                str(org_id), MessageListOptions(event_types=[event_type])
+            )
+            found = any(m.id == result.id for m in msgs.data)
+            print(
+                f"[SVIX VERIFY] msg_id={result.id} found_in_list={found} "
+                f"total_msgs={len(msgs.data)} event_type={event_type}"
+            )
+        except Exception as exc:
+            print(f"[SVIX VERIFY FAILED] {exc!r}")
 
     # -------------------------------------------------------------------------
     # WebhookAdmin - Subscriptions

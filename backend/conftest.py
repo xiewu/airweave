@@ -57,6 +57,22 @@ def fake_webhook_admin():
 
 
 @pytest.fixture
+def fake_endpoint_verifier():
+    """Fake EndpointVerifier that records verification calls."""
+    from airweave.adapters.webhooks.fake import FakeEndpointVerifier
+
+    return FakeEndpointVerifier()
+
+
+@pytest.fixture
+def fake_webhook_service():
+    """Fake WebhookService with in-memory state for assertions."""
+    from airweave.adapters.webhooks.fake import FakeWebhookService
+
+    return FakeWebhookService()
+
+
+@pytest.fixture
 def fake_circuit_breaker():
     """Fake CircuitBreaker that tracks provider state."""
     from airweave.adapters.circuit_breaker.fake import FakeCircuitBreaker
@@ -117,6 +133,8 @@ def test_container(
     fake_circuit_breaker,
     fake_ocr_provider,
     fake_source_service,
+    fake_endpoint_verifier,
+    fake_webhook_service,
 ):
     """A Container with all dependencies replaced by fakes.
 
@@ -132,6 +150,8 @@ def test_container(
         event_bus=fake_event_bus,
         webhook_publisher=fake_webhook_publisher,
         webhook_admin=fake_webhook_admin,
+        endpoint_verifier=fake_endpoint_verifier,
+        webhook_service=fake_webhook_service,
         circuit_breaker=fake_circuit_breaker,
         ocr_provider=fake_ocr_provider,
         source_service=fake_source_service,

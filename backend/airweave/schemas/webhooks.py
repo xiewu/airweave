@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
-from airweave.domains.webhooks.types import EventType
+from airweave.domains.webhooks.types import EventType, HealthStatus
 
 # Import shared error response models
 from airweave.schemas.errors import (
@@ -149,7 +149,12 @@ class WebhookMessageWithAttempts(WebhookMessage):
 
 
 class WebhookSubscription(BaseModel):
-    """A webhook subscription (endpoint) configuration."""
+    """A webhook subscription (endpoint) configuration.
+
+    This is the lightweight representation returned by list, create, update,
+    and delete endpoints.  For the full detail view (delivery attempts,
+    signing secret) see ``WebhookSubscriptionDetail``.
+    """
 
     id: str = Field(
         ...,
@@ -190,10 +195,60 @@ class WebhookSubscription(BaseModel):
         description="When this subscription was last updated (ISO 8601 format, UTC)",
         json_schema_extra={"example": "2024-03-15T14:30:00Z"},
     )
+    health_status: HealthStatus = Field(
+        default=HealthStatus.unknown,
+        description="Health status of this subscription based on recent delivery attempts. "
+        "Values: 'healthy' (all recent deliveries succeeded), "
+        "'degraded' (mix of successes and failures), "
+        "'failing' (consecutive failures beyond threshold), "
+        "'unknown' (no delivery data yet).",
+        json_schema_extra={"example": "healthy"},
+    )
+
+    @classmethod
+    def from_domain(
+        cls,
+        sub: "DomainSubscription",
+        health: HealthStatus = HealthStatus.unknown,
+    ) -> "WebhookSubscription":
+        """Convert a domain Subscription to API response."""
+        return cls(
+            id=sub.id,
+            url=sub.url,
+            filter_types=sub.event_types,
+            disabled=sub.disabled,
+            description=None,
+            created_at=sub.created_at,
+            updated_at=sub.updated_at,
+            health_status=health,
+        )
+
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "example": {
+                "id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+                "url": "https://api.mycompany.com/webhooks/airweave",
+                "filter_types": ["sync.completed", "sync.failed"],
+                "disabled": False,
+                "description": "Production notifications for data team",
+                "created_at": "2024-03-01T08:00:00Z",
+                "updated_at": "2024-03-15T14:30:00Z",
+                "health_status": "healthy",
+            }
+        },
+    }
+
+
+class WebhookSubscriptionDetail(WebhookSubscription):
+    """Full subscription detail, including delivery attempts and signing secret.
+
+    Returned by ``GET /subscriptions/{id}`` only.
+    """
+
     delivery_attempts: Optional[List["DeliveryAttempt"]] = Field(
         default=None,
-        description="Recent delivery attempts for this subscription. Only included when "
-        "fetching a single subscription via GET /subscriptions/{id}.",
+        description="Recent delivery attempts for this subscription.",
     )
     secret: Optional[str] = Field(
         default=None,
@@ -207,10 +262,11 @@ class WebhookSubscription(BaseModel):
     def from_domain(
         cls,
         sub: "DomainSubscription",
+        health: HealthStatus = HealthStatus.unknown,
         delivery_attempts: Optional[List["DeliveryAttempt"]] = None,
         secret: Optional[str] = None,
-    ) -> "WebhookSubscription":
-        """Convert a domain Subscription to API response."""
+    ) -> "WebhookSubscriptionDetail":
+        """Convert a domain Subscription to detailed API response."""
         return cls(
             id=sub.id,
             url=sub.url,
@@ -219,6 +275,7 @@ class WebhookSubscription(BaseModel):
             description=None,
             created_at=sub.created_at,
             updated_at=sub.updated_at,
+            health_status=health,
             delivery_attempts=delivery_attempts,
             secret=secret,
         )
@@ -234,6 +291,7 @@ class WebhookSubscription(BaseModel):
                 "description": "Production notifications for data team",
                 "created_at": "2024-03-01T08:00:00Z",
                 "updated_at": "2024-03-15T14:30:00Z",
+                "health_status": "healthy",
                 "delivery_attempts": None,
                 "secret": None,
             }

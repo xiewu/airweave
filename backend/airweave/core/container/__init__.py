@@ -29,6 +29,8 @@ Usage:
         event_bus=FakeEventBus(),
         webhook_publisher=FakeWebhookPublisher(),
         webhook_admin=FakeWebhookAdmin(),
+        endpoint_verifier=FakeEndpointVerifier(),
+        webhook_service=FakeWebhookService(),
     )
 
 Module structure:
