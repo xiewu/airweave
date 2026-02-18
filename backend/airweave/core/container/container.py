@@ -22,7 +22,16 @@ from airweave.core.protocols import (
     WebhookPublisher,
     WebhookServiceProtocol,
 )
-from airweave.domains.sources.protocols import SourceServiceProtocol
+from airweave.domains.auth_provider.protocols import AuthProviderRegistryProtocol
+from airweave.domains.connections.protocols import ConnectionRepositoryProtocol
+from airweave.domains.credentials.protocols import IntegrationCredentialRepositoryProtocol
+from airweave.domains.oauth.protocols import OAuth2ServiceProtocol
+from airweave.domains.source_connections.protocols import SourceConnectionRepositoryProtocol
+from airweave.domains.sources.protocols import (
+    SourceLifecycleServiceProtocol,
+    SourceRegistryProtocol,
+    SourceServiceProtocol,
+)
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,21 @@ class Container:
 
     # Source service — API-facing source operations
     source_service: SourceServiceProtocol
+
+    # Source registries (shared across services)
+    source_registry: SourceRegistryProtocol
+    auth_provider_registry: AuthProviderRegistryProtocol
+
+    # Repository protocols (thin wrappers around crud singletons)
+    sc_repo: SourceConnectionRepositoryProtocol
+    conn_repo: ConnectionRepositoryProtocol
+    cred_repo: IntegrationCredentialRepositoryProtocol
+
+    # OAuth2 token operations
+    oauth2_service: OAuth2ServiceProtocol
+
+    # Source lifecycle — creates/validates configured source instances
+    source_lifecycle_service: SourceLifecycleServiceProtocol
 
     # -----------------------------------------------------------------
     # Convenience methods

@@ -154,8 +154,9 @@ class TestQueryBuilder:
         assert params["query"] == "test query"
         assert params["hits"] == 10
         assert params["offset"] == 0
-        assert params["presentation.summary"] == "full"
         assert params["ranking.softtimeout.enable"] == "true"
+        # We rely on Vespa's default summary (all fields with summary indexing)
+        assert "presentation.summary" not in params
 
     def test_build_params_ranking_profile_hybrid(self, query_builder, sample_dense_embeddings):
         """Test hybrid strategy selects hybrid ranking profile."""

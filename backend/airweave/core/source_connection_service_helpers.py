@@ -254,6 +254,7 @@ class SourceConnectionHelpers:
 
         raise TypeError(f"config_fields must be mapping-like; got {type(value).__name__}")
 
+    # [code blue] replace with source_registry.get(short_name).auth_config_ref
     async def validate_auth_fields(
         self, db: AsyncSession, short_name: str, auth_fields: dict, ctx: ApiContext
     ) -> AuthConfig:
@@ -365,6 +366,7 @@ class SourceConnectionHelpers:
                 ) from e
             raise HTTPException(status_code=422, detail=str(e)) from e
 
+    # [code blue] replace with SourceLifecycleService.validate()
     async def validate_direct_auth(
         self,
         db: AsyncSession,
@@ -396,6 +398,7 @@ class SourceConnectionHelpers:
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Validation failed: {str(e)}") from e
 
+    # [code blue] replace with SourceLifecycleService.validate()
     async def validate_oauth_token(
         self,
         db: AsyncSession,

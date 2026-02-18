@@ -91,7 +91,7 @@ def fake_ocr_provider():
 @pytest.fixture
 def fake_source_service():
     """Fake SourceService that returns canned source schemas."""
-    from airweave.domains.sources.fake import FakeSourceService
+    from airweave.domains.sources.fakes.service import FakeSourceService
 
     return FakeSourceService()
 
@@ -99,7 +99,7 @@ def fake_source_service():
 @pytest.fixture
 def fake_source_registry():
     """Fake SourceRegistry for testing registry consumers."""
-    from airweave.domains.sources.fake import FakeSourceRegistry
+    from airweave.domains.sources.fakes.registry import FakeSourceRegistry
 
     return FakeSourceRegistry()
 
@@ -126,6 +126,46 @@ def fake_entity_definition_registry():
 
 
 @pytest.fixture
+def fake_source_lifecycle_service():
+    """Fake SourceLifecycleService for testing lifecycle consumers."""
+    from airweave.domains.sources.fakes.lifecycle import FakeSourceLifecycleService
+
+    return FakeSourceLifecycleService()
+
+
+@pytest.fixture
+def fake_sc_repo():
+    """Fake SourceConnectionRepository."""
+    from airweave.domains.source_connections.fakes.repository import FakeSourceConnectionRepository
+
+    return FakeSourceConnectionRepository()
+
+
+@pytest.fixture
+def fake_conn_repo():
+    """Fake ConnectionRepository."""
+    from airweave.domains.connections.fakes.repository import FakeConnectionRepository
+
+    return FakeConnectionRepository()
+
+
+@pytest.fixture
+def fake_cred_repo():
+    """Fake IntegrationCredentialRepository."""
+    from airweave.domains.credentials.fakes.repository import FakeIntegrationCredentialRepository
+
+    return FakeIntegrationCredentialRepository()
+
+
+@pytest.fixture
+def fake_oauth2_service():
+    """Fake OAuth2Service."""
+    from airweave.domains.oauth.fakes.oauth2_service import FakeOAuth2Service
+
+    return FakeOAuth2Service()
+
+
+@pytest.fixture
 def test_container(
     fake_event_bus,
     fake_webhook_publisher,
@@ -135,6 +175,13 @@ def test_container(
     fake_source_service,
     fake_endpoint_verifier,
     fake_webhook_service,
+    fake_source_registry,
+    fake_auth_provider_registry,
+    fake_sc_repo,
+    fake_conn_repo,
+    fake_cred_repo,
+    fake_oauth2_service,
+    fake_source_lifecycle_service,
 ):
     """A Container with all dependencies replaced by fakes.
 
@@ -155,4 +202,11 @@ def test_container(
         circuit_breaker=fake_circuit_breaker,
         ocr_provider=fake_ocr_provider,
         source_service=fake_source_service,
+        source_registry=fake_source_registry,
+        auth_provider_registry=fake_auth_provider_registry,
+        sc_repo=fake_sc_repo,
+        conn_repo=fake_conn_repo,
+        cred_repo=fake_cred_repo,
+        oauth2_service=fake_oauth2_service,
+        source_lifecycle_service=fake_source_lifecycle_service,
     )

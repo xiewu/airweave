@@ -32,6 +32,7 @@ from airweave.platform.utils.source_factory_utils import (
 )
 
 
+# [code blue] replace with SourceLifecycleService.create()
 class SourceContextBuilder:
     """Builds source context with all required configuration."""
 

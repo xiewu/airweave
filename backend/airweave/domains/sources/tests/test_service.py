@@ -10,7 +10,7 @@ import pytest
 
 from airweave.core.shared_models import FeatureFlag
 from airweave.domains.sources.exceptions import SourceNotFoundError
-from airweave.domains.sources.fake import FakeSourceRegistry
+from airweave.domains.sources.fakes.registry import FakeSourceRegistry
 from airweave.domains.sources.service import SourceService
 from airweave.domains.sources.tests.conftest import _make_ctx, _make_entry, _make_settings
 

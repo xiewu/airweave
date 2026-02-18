@@ -12,7 +12,7 @@ import pytest
 from airweave.api.context import ApiContext
 from airweave.core.logging import logger
 from airweave.core.shared_models import AuthMethod, FeatureFlag
-from airweave.domains.sources.fake import FakeSourceRegistry
+from airweave.domains.sources.fakes.registry import FakeSourceRegistry
 from airweave.domains.sources.service import SourceService
 from airweave.domains.sources.types import SourceRegistryEntry
 from airweave.platform.configs._base import Fields

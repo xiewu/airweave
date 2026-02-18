@@ -923,6 +923,7 @@ class SearchFactory:
         except Exception as e:
             raise ValueError(f"Error getting federated sources: {e}")
 
+    # [code blue] replace with SourceLifecycleService.create()
     async def _instantiate_federated_source(
         self, db: AsyncSession, source_connection, ctx: ApiContext
     ) -> Optional[BaseSource]:

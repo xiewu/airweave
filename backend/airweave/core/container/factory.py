@@ -14,8 +14,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from airweave.adapters.circuit_breaker import InMemoryCircuitBreaker
 from airweave.adapters.event_bus.in_memory import InMemoryEventBus
 from airweave.adapters.ocr.docling import DoclingOcrAdapter
+from airweave.domains.connections.repository import ConnectionRepository
+from airweave.domains.credentials.repository import IntegrationCredentialRepository
+from airweave.domains.oauth.oauth2_service import OAuth2Service
+from airweave.domains.source_connections.repository import SourceConnectionRepository
 from airweave.adapters.webhooks.endpoint_verifier import HttpEndpointVerifier
 from airweave.adapters.webhooks.svix import SvixAdapter
 from airweave.core.container.container import Container
@@ -24,6 +29,7 @@ from airweave.core.protocols.event_bus import EventBus
 from airweave.core.protocols.webhooks import WebhookPublisher
 from airweave.domains.auth_provider.registry import AuthProviderRegistry
 from airweave.domains.entities.registry import EntityDefinitionRegistry
+from airweave.domains.sources.lifecycle import SourceLifecycleService
 from airweave.domains.sources.registry import SourceRegistry
 from airweave.domains.sources.service import SourceService
 from airweave.domains.webhooks.service import WebhookServiceImpl
@@ -89,11 +95,12 @@ def create_container(settings: Settings) -> Container:
     circuit_breaker = _create_circuit_breaker()
     ocr_provider = _create_ocr_provider(circuit_breaker, settings)
 
-    # Source Service
+    # Source Service + Source Lifecycle Service
     # Auth provider registry is built first, then passed to the source
     # registry so it can compute supported_auth_providers per source.
+    # Both services share the same source_registry instance.
     # -----------------------------------------------------------------
-    source_service = _create_source_service(settings)
+    source_deps = _create_source_services(settings)
 
     return Container(
         event_bus=event_bus,
@@ -101,7 +108,14 @@ def create_container(settings: Settings) -> Container:
         webhook_admin=svix_adapter,
         circuit_breaker=circuit_breaker,
         ocr_provider=ocr_provider,
-        source_service=source_service,
+        source_service=source_deps["source_service"],
+        source_registry=source_deps["source_registry"],
+        auth_provider_registry=source_deps["auth_provider_registry"],
+        sc_repo=source_deps["sc_repo"],
+        conn_repo=source_deps["conn_repo"],
+        cred_repo=source_deps["cred_repo"],
+        oauth2_service=source_deps["oauth2_service"],
+        source_lifecycle_service=source_deps["source_lifecycle_service"],
         endpoint_verifier=endpoint_verifier,
         webhook_service=webhook_service,
     )
@@ -139,8 +153,6 @@ def _create_circuit_breaker() -> "CircuitBreaker":
     Uses a 120-second cooldown: after a provider fails, it is skipped
     for 2 minutes before being retried (half-open state).
     """
-    from airweave.adapters.circuit_breaker import InMemoryCircuitBreaker
-
     return InMemoryCircuitBreaker(cooldown_seconds=120)
 
 
@@ -182,13 +194,16 @@ def _create_ocr_provider(circuit_breaker: "CircuitBreaker", settings: "Settings"
     return FallbackOcrProvider(providers=providers, circuit_breaker=circuit_breaker)
 
 
-def _create_source_service(settings: Settings) -> SourceService:
-    """Create source service with its registry dependencies.
+def _create_source_services(settings: Settings) -> dict:
+    """Create source services, registries, repository adapters, and lifecycle service.
 
     Build order matters:
     1. Auth provider registry (no dependencies)
     2. Entity definition registry (no dependencies)
     3. Source registry (depends on both)
+    4. Repository adapters (thin wrappers around crud singletons)
+    5. OAuth2 adapter (thin wrapper around oauth2_service singleton)
+    6. SourceLifecycleService (depends on all of the above)
     """
     auth_provider_registry = AuthProviderRegistry()
     auth_provider_registry.build()
@@ -199,7 +214,32 @@ def _create_source_service(settings: Settings) -> SourceService:
     source_registry = SourceRegistry(auth_provider_registry, entity_definition_registry)
     source_registry.build()
 
-    return SourceService(
+    # Repository adapters
+    sc_repo = SourceConnectionRepository()
+    conn_repo = ConnectionRepository()
+    cred_repo = IntegrationCredentialRepository()
+    oauth2_svc = OAuth2Service()
+
+    source_service = SourceService(
         source_registry=source_registry,
         settings=settings,
     )
+    source_lifecycle_service = SourceLifecycleService(
+        source_registry=source_registry,
+        auth_provider_registry=auth_provider_registry,
+        sc_repo=sc_repo,
+        conn_repo=conn_repo,
+        cred_repo=cred_repo,
+        oauth2_service=oauth2_svc,
+    )
+
+    return {
+        "source_service": source_service,
+        "source_registry": source_registry,
+        "auth_provider_registry": auth_provider_registry,
+        "sc_repo": sc_repo,
+        "conn_repo": conn_repo,
+        "cred_repo": cred_repo,
+        "oauth2_service": oauth2_svc,
+        "source_lifecycle_service": source_lifecycle_service,
+    }
