@@ -7,6 +7,18 @@ slug: webhooks/setup
 
 This guide walks you through setting up webhook subscriptions, handling incoming events, verifying signatures, and managing your event delivery.
 
+<video
+  src="./create-webhook-splitscreen-demo.mp4"
+  controls
+  loop
+  autoplay
+  muted
+  playsinline
+  style={{ aspectRatio: '16 / 9', width: '100%' }}
+>
+  Your browser does not support the video tag.
+</video>
+
 ## Creating a Subscription
 
 Register your endpoint to start receiving events. You can subscribe to any combination of [event types](/webhooks/types-and-formats) across sync, source connection, and collection lifecycles:
@@ -60,7 +72,7 @@ console.log(`Subscription ID: ${subscription.id}`);
 {
   "id": "ep_2bVxUn3RFnLYHa8z6ZKHMT9PqPX",
   "url": "https://your-server.com/webhooks/airweave",
-  "filter_types": ["sync.completed", "sync.failed"],
+  "filter_types": ["sync.completed", "sync.failed", "source_connection.created", "collection.deleted"],
   "disabled": false,
   "created_at": "2025-01-15T10:30:00Z",
   "updated_at": "2025-01-15T10:30:00Z"
@@ -77,7 +89,7 @@ Your endpoint receives POST requests with event payloads. Here's how to handle t
 
 <CodeBlocks>
 ```python title="Python (FastAPI)"
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 
 app = FastAPI()
 
@@ -447,7 +459,7 @@ This triggers a recovery task that replays failed messages in chronological orde
 ## Sample Application
 
 <Note>
-A complete sample application demonstrating webhook handling, signature verification, and event processing is available in the Airweave repository under `examples/webhook-demo`.
+A sample webhook receiver is available in the Airweave repository under `examples/webhook-demo`. It handles incoming webhooks, verifies signatures, and provides a real-time event viewer for inspecting deliveries as they arrive.
 </Note>
 
 ## Next Steps
