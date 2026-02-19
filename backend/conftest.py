@@ -115,7 +115,7 @@ def fake_auth_provider_registry():
 @pytest.fixture
 def fake_entity_definition_registry():
     """Fake EntityDefinitionRegistry for testing registry consumers."""
-    from airweave.domains.entities.fake import FakeEntityDefinitionRegistry
+    from airweave.domains.entities.fakes.registry import FakeEntityDefinitionRegistry
 
     return FakeEntityDefinitionRegistry()
 
