@@ -7,7 +7,7 @@ logging, and request metadata into a single injectable dependency.
 from typing import Any, Dict, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from airweave import schemas
 from airweave.core.logging import ContextualLogger
@@ -40,10 +40,7 @@ class ApiContext(BaseModel):
         None  # ContextualAnalyticsService - using Any to avoid circular imports
     )
 
-    class Config:
-        """Pydantic configuration."""
-
-        arbitrary_types_allowed = True  # For ContextualLogger
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @property
     def has_user_context(self) -> bool:

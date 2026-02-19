@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from airweave.platform.configs._base import BaseConfig
 
@@ -81,17 +81,36 @@ class URLAndAPIKeyAuthConfig(AuthConfig):
 class ODBCAuthConfig(AuthConfig):
     """ODBC authentication credentials schema."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     host: str = Field(title="Host", description="The host of the ODBC database")
     port: int = Field(title="Port", description="The port of the ODBC database")
     database: str = Field(title="Database", description="The name of the ODBC database")
     username: str = Field(title="Username", description="The username for the ODBC database")
     password: str = Field(title="Password", description="The password for the ODBC database")
-    schema: str = Field(title="Schema", description="The schema of the ODBC database")
+    db_schema: str = Field(
+        alias="schema", title="Schema", description="The schema of the ODBC database"
+    )
     tables: str = Field(title="Tables", description="The tables of the ODBC database")
 
 
 class BaseDatabaseAuthConfig(AuthConfig):
     """Base database authentication configuration."""
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "host": "localhost",
+                "port": 5432,
+                "database": "mydb",
+                "user": "postgres",
+                "password": "secret",
+                "schema": "public",
+                "tables": "users,orders",
+            }
+        },
+    )
 
     host: str = Field(
         title="Host",
@@ -119,8 +138,9 @@ class BaseDatabaseAuthConfig(AuthConfig):
         description="The password for the PostgreSQL database",
         min_length=1,
     )
-    schema: str = Field(
+    db_schema: str = Field(
         default="public",
+        alias="schema",
         title="Schema",
         description="The schema of the PostgreSQL database",
         min_length=1,
@@ -157,7 +177,7 @@ class BaseDatabaseAuthConfig(AuthConfig):
             raise ValueError("Port must be between 1 and 65535")
         return v
 
-    @field_validator("database", "user", "password", "schema")
+    @field_validator("database", "user", "password", "db_schema")
     @classmethod
     def validate_not_empty(cls, v: str, info) -> str:
         """Validate that required fields are not empty."""
@@ -188,21 +208,6 @@ class BaseDatabaseAuthConfig(AuthConfig):
                     "Use alphanumeric characters, underscores, and dots only"
                 )
         return v
-
-    class Config:
-        """Pydantic config."""
-
-        json_schema_extra = {
-            "example": {
-                "host": "localhost",
-                "port": 5432,
-                "database": "mydb",
-                "user": "postgres",
-                "password": "secret",
-                "schema": "public",
-                "tables": "users,orders",
-            }
-        }
 
 
 # Destination auth configs

@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from pydantic import Field, field_validator, validator
+from pydantic import Field, field_validator
 
 from airweave.platform.configs._base import BaseConfig, RequiredTemplateConfig
 
@@ -50,7 +50,8 @@ class BitbucketConfig(SourceConfig):
         ),
     )
 
-    @validator("file_extensions", pre=True)
+    @field_validator("file_extensions", mode="before")
+    @classmethod
     def parse_file_extensions(cls, value):
         """Convert string input to list if needed."""
         if isinstance(value, str):
@@ -201,7 +202,8 @@ class GmailConfig(SourceConfig):
         ),
     )
 
-    @validator("included_labels", "excluded_labels", "excluded_categories", pre=True)
+    @field_validator("included_labels", "excluded_labels", "excluded_categories", mode="before")
+    @classmethod
     def parse_list_fields(cls, value):
         """Convert comma-separated string to list if needed."""
         if isinstance(value, str):
@@ -210,7 +212,8 @@ class GmailConfig(SourceConfig):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
-    @validator("after_date")
+    @field_validator("after_date")
+    @classmethod
     def validate_date_format(cls, value):
         """Validate date format and convert to YYYY/MM/DD."""
         if not value:
@@ -254,7 +257,8 @@ class GoogleDriveConfig(SourceConfig):
         ),
     )
 
-    @validator("include_patterns", pre=True)
+    @field_validator("include_patterns", mode="before")
+    @classmethod
     def _parse_include_patterns(cls, value):
         if isinstance(value, str):
             return [p.strip() for p in value.split(",") if p.strip()]
@@ -385,7 +389,8 @@ class OutlookMailConfig(SourceConfig):
         ),
     )
 
-    @validator("included_folders", "excluded_folders", pre=True)
+    @field_validator("included_folders", "excluded_folders", mode="before")
+    @classmethod
     def parse_list_fields(cls, value):
         """Convert comma-separated string to list if needed."""
         if isinstance(value, str):
@@ -394,7 +399,8 @@ class OutlookMailConfig(SourceConfig):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
-    @validator("after_date")
+    @field_validator("after_date")
+    @classmethod
     def validate_date_format(cls, value):
         """Validate date format and convert to YYYY/MM/DD."""
         if not value:
@@ -433,7 +439,8 @@ class CTTIConfig(SourceConfig):
         ),
     )
 
-    @validator("limit", pre=True)
+    @field_validator("limit", mode="before")
+    @classmethod
     def parse_limit(cls, value):
         """Convert string input to integer if needed."""
         if isinstance(value, str):
@@ -445,7 +452,8 @@ class CTTIConfig(SourceConfig):
                 raise ValueError("Limit must be a valid integer") from e
         return value
 
-    @validator("skip", pre=True)
+    @field_validator("skip", mode="before")
+    @classmethod
     def parse_skip(cls, value):
         """Convert string input to integer if needed."""
         if isinstance(value, str):
