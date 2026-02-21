@@ -426,18 +426,19 @@ async def run(
         ),
         json_schema_extra={"example": False},
     ),
+    source_connection_service: SourceConnectionServiceProtocol = Inject(
+        SourceConnectionServiceProtocol
+    ),
 ) -> schemas.SourceConnectionJob:
     """Trigger a sync run for a source connection."""
-    # Check if organization is allowed to process entities
     await guard_rail.is_allowed(ActionType.ENTITIES)
 
-    run = await source_connection_service.run(
+    return await source_connection_service.run(
         db,
         id=source_connection_id,
         ctx=ctx,
         force_full_sync=force_full_sync,
     )
-    return run
 
 
 @router.get(
@@ -482,6 +483,9 @@ async def get_source_connection_jobs(
         le=1000,
         description="Maximum number of jobs to return (1-1000)",
         json_schema_extra={"example": 100},
+    ),
+    source_connection_service: SourceConnectionServiceProtocol = Inject(
+        SourceConnectionServiceProtocol
     ),
 ) -> List[schemas.SourceConnectionJob]:
     """Get sync jobs for a source connection."""
@@ -533,32 +537,15 @@ async def cancel_job(
         json_schema_extra={"example": "660e8400-e29b-41d4-a716-446655440001"},
     ),
     ctx: ApiContext = Depends(deps.get_context),
+    source_connection_service: SourceConnectionServiceProtocol = Inject(
+        SourceConnectionServiceProtocol
+    ),
 ) -> schemas.SourceConnectionJob:
     """Cancel a running sync job."""
     return await source_connection_service.cancel_job(
         db,
         source_connection_id=source_connection_id,
         job_id=job_id,
-        ctx=ctx,
-    )
-
-
-@router.post("/{source_connection_id}/make-continuous", response_model=schemas.SourceConnection)
-async def make_continuous(
-    *,
-    db: AsyncSession = Depends(get_db),
-    source_connection_id: UUID,
-    cursor_field: Optional[str] = Query(None, description="Field to use for incremental sync"),
-    ctx: ApiContext = Depends(deps.get_context),
-) -> schemas.SourceConnection:
-    """Convert source connection to continuous sync mode.
-
-    Only available for sources that support incremental sync.
-    """
-    return await source_connection_service.make_continuous(
-        db,
-        id=source_connection_id,
-        cursor_field=cursor_field,
         ctx=ctx,
     )
 
