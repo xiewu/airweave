@@ -171,7 +171,8 @@ async def test_prometheus_metrics_endpoint_running_state(
         response = await server._handle_metrics(request)
 
         assert response.status == 200
-        assert "text/plain" in response.content_type
+        assert response.content_type == "text/plain"
+        assert response.charset == "utf-8"
 
         snap = fake_wm.last_snapshot
         assert snap is not None

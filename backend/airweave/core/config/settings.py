@@ -237,7 +237,7 @@ class Settings(BaseSettings):
 
     # Svix (webhooks) configuration
     SVIX_URL: str = "http://localhost:8071"
-    SVIX_JWT_SECRET: str = "default_signing_secret"
+    SVIX_JWT_SECRET: str = "default_signing_secret_change_me!"
     WEBHOOK_VERIFY_ENDPOINTS: bool = True
 
     @field_validator("HEALTH_CHECK_TIMEOUT", mode="before")

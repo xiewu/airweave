@@ -126,6 +126,7 @@ class WorkerControlServer:
             return web.Response(
                 body=metrics_data,
                 content_type=self._renderer.content_type,
+                charset=self._renderer.charset,
             )
         except Exception as e:
             logger.error(f"Error generating Prometheus metrics: {e}", exc_info=True)

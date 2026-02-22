@@ -167,16 +167,24 @@ async def main() -> None:
     initialize_container(settings)
     logger.info("Container initialized successfully")
 
-    # 2. Initialize converters with OCR from the container
+    # 2. Require OCR backend for the sync worker
+    if container_mod.container.ocr_provider is None:
+        logger.error(
+            "Temporal worker requires an OCR backend. "
+            "Set MISTRAL_API_KEY or DOCLING_BASE_URL and restart."
+        )
+        raise SystemExit(1)
+
+    # 3. Initialize converters with OCR from the container
     from airweave.platform.converters import initialize_converters
 
     initialize_converters(ocr_provider=container_mod.container.ocr_provider)
 
-    # 3. Create worker with config
+    # 4. Create worker with config
     config = WorkerConfig.from_settings()
     worker = TemporalWorker(config)
 
-    # 3. Set up signal handlers
+    # 5. Set up signal handlers
     def signal_handler(signum: int, frame: Any) -> None:
         logger.info(f"Received signal {signum}, shutting down...")
         asyncio.create_task(worker.stop())
@@ -184,7 +192,7 @@ async def main() -> None:
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # 4. Run worker
+    # 6. Run worker
     try:
         await worker.start()
     except KeyboardInterrupt:

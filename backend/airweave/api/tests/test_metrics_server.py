@@ -23,6 +23,7 @@ class TestMetricsServer:
 
         assert response.body == b"# fake metrics\n"
         assert response.content_type == "text/plain"
+        assert response.charset == "utf-8"
         assert fake.generate_calls == 1
 
     @pytest.mark.asyncio
@@ -47,6 +48,36 @@ class TestMetricsServer:
                     assert resp.status == 200
                     body = await resp.read()
                     assert body == b"# fake metrics\n"
+                    ct = resp.headers["Content-Type"]
+                    assert ct.count("charset") == 1
+        finally:
+            await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_prometheus_renderer_serves_without_duplicate_charset(self):
+        """Real PrometheusMetricsRenderer must not cause a 500."""
+        import aiohttp
+        from prometheus_client import CollectorRegistry
+
+        from airweave.adapters.metrics import PrometheusMetricsRenderer
+        from airweave.api.metrics import MetricsServer
+
+        registry = CollectorRegistry()
+        renderer = PrometheusMetricsRenderer(registry=registry)
+        server = MetricsServer(renderer, port=0)
+        await server.start()
+
+        try:
+            site = list(server._runner.sites)[0]
+            port = site._server.sockets[0].getsockname()[1]
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"http://127.0.0.1:{port}/metrics"
+                ) as resp:
+                    assert resp.status == 200
+                    ct = resp.headers["Content-Type"]
+                    assert ct.count("charset") == 1
         finally:
             await server.stop()
 

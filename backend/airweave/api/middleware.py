@@ -512,16 +512,16 @@ async def rate_limit_exception_handler(
     )
 
 
-_METRICS_SKIP_PATHS = frozenset(
-    {
-        "/health",
-        "/metrics",
-        "/docs",
-        "/openapi.json",
-        "/favicon.ico",
-        "/redoc",
-    }
+_METRICS_SKIP_PREFIXES = (
+    "/health",
+    "/metrics",
+    "/docs",
+    "/openapi.json",
+    "/favicon.ico",
+    "/redoc",
 )
+_METRICS_SKIP_EXACT = frozenset(_METRICS_SKIP_PREFIXES)
+_METRICS_SKIP_SLASH = tuple(p + "/" for p in _METRICS_SKIP_PREFIXES)
 
 
 async def http_metrics_middleware(
@@ -536,7 +536,8 @@ async def http_metrics_middleware(
     duration and response-size are recorded when the body stream finishes
     rather than when headers are sent.
     """
-    if request.url.path in _METRICS_SKIP_PATHS:
+    path = request.url.path
+    if path in _METRICS_SKIP_EXACT or path.startswith(_METRICS_SKIP_SLASH):
         return await call_next(request)
 
     metrics = request.app.state.http_metrics
@@ -722,10 +723,9 @@ def _build_endpoint_name(request: Request, *, fallback: str | None = None) -> st
 
 
 def _should_skip_analytics(request: Request) -> bool:
-    """Skip analytics for certain paths (including sub-paths like /health/ready)."""
-    skip_prefixes = ("/health", "/metrics", "/docs", "/openapi.json", "/favicon.ico", "/redoc")
+    """Skip analytics for certain paths (including sub-paths)."""
     path = request.url.path
-    return any(path == p or path.startswith(p + "/") for p in skip_prefixes)
+    return path in _METRICS_SKIP_EXACT or path.startswith(_METRICS_SKIP_SLASH)
 
 
 async def _track_api_call_async(

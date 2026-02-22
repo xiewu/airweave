@@ -168,7 +168,12 @@ class MetricsRenderer(Protocol):
 
     @property
     def content_type(self) -> str:
-        """MIME type for the serialized metrics output."""
+        """MIME type without charset."""
+        ...
+
+    @property
+    def charset(self) -> str:
+        """Character encoding for the metrics output."""
         ...
 
     def generate(self) -> bytes:

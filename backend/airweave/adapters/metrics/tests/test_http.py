@@ -1,6 +1,33 @@
 """Unit tests for HTTP metrics adapters and renderer."""
 
+import pytest
+
 from airweave.adapters.metrics import FakeHttpMetrics, FakeMetricsRenderer, PrometheusHttpMetrics
+from airweave.adapters.metrics.renderer import _parse_content_type
+
+
+class TestParseContentType:
+    """Tests for the _parse_content_type helper."""
+
+    def test_standard_prometheus_content_type(self):
+        ct, charset = _parse_content_type("text/plain; version=0.0.4; charset=utf-8")
+        assert ct == "text/plain; version=0.0.4"
+        assert charset == "utf-8"
+
+    def test_no_charset_defaults_to_utf8(self):
+        ct, charset = _parse_content_type("text/plain; version=0.0.4")
+        assert ct == "text/plain; version=0.0.4"
+        assert charset == "utf-8"
+
+    def test_charset_is_case_insensitive(self):
+        ct, charset = _parse_content_type("text/plain; Charset=UTF-8")
+        assert ct == "text/plain"
+        assert charset == "UTF-8"
+
+    def test_bare_media_type(self):
+        ct, charset = _parse_content_type("application/json")
+        assert ct == "application/json"
+        assert charset == "utf-8"
 
 
 class TestFakeHttpMetrics:
@@ -86,7 +113,26 @@ class TestPrometheusMetricsRenderer:
 
         registry = CollectorRegistry()
         renderer = PrometheusMetricsRenderer(registry=registry)
-        assert renderer.content_type == "text/plain; version=0.0.4; charset=utf-8"
+        assert renderer.content_type == "text/plain; version=0.0.4"
+
+    def test_charset_is_utf8(self):
+        from prometheus_client import CollectorRegistry
+
+        from airweave.adapters.metrics import PrometheusMetricsRenderer
+
+        registry = CollectorRegistry()
+        renderer = PrometheusMetricsRenderer(registry=registry)
+        assert renderer.charset == "utf-8"
+
+    def test_content_type_excludes_charset(self):
+        """content_type must not contain charset — aiohttp adds it separately."""
+        from prometheus_client import CollectorRegistry
+
+        from airweave.adapters.metrics import PrometheusMetricsRenderer
+
+        registry = CollectorRegistry()
+        renderer = PrometheusMetricsRenderer(registry=registry)
+        assert "charset" not in renderer.content_type
 
     def test_renders_metrics_from_shared_registry(self):
         from prometheus_client import CollectorRegistry
@@ -100,3 +146,19 @@ class TestPrometheusMetricsRenderer:
         http.observe_request("GET", "/test", "200", 0.01)
         output = renderer.generate().decode()
         assert "airweave_http_requests_total" in output
+
+
+class TestFakeMetricsRenderer:
+    """Tests for the FakeMetricsRenderer test double."""
+
+    def test_content_type(self):
+        from airweave.adapters.metrics import FakeMetricsRenderer
+
+        renderer = FakeMetricsRenderer()
+        assert renderer.content_type == "text/plain"
+
+    def test_charset(self):
+        from airweave.adapters.metrics import FakeMetricsRenderer
+
+        renderer = FakeMetricsRenderer()
+        assert renderer.charset == "utf-8"

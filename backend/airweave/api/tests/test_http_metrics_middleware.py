@@ -34,10 +34,20 @@ class TestHttpMetricsMiddleware:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "path",
-        ["/health", "/metrics", "/docs", "/openapi.json", "/favicon.ico", "/redoc"],
+        [
+            "/health",
+            "/health/ready",
+            "/health/live",
+            "/metrics",
+            "/docs",
+            "/docs/oauth2-redirect",
+            "/openapi.json",
+            "/favicon.ico",
+            "/redoc",
+        ],
     )
     async def test_skips_metrics_exempt_path(self, _make_request, fake_metrics, path):
-        """Middleware should pass through every _METRICS_SKIP_PATHS entry without recording."""
+        """Middleware should skip exact matches and sub-paths of _METRICS_SKIP_PREFIXES."""
         from airweave.api.middleware import http_metrics_middleware
 
         request = _make_request(path=path)

@@ -150,6 +150,18 @@
   description: Knowledge base connectors (Notion, Confluence, etc.)
   color: "0e8a16"
 
+- name: "connector:database"
+  description: Database source connectors (Postgres, Mongo, etc.)
+  color: "0e8a16"
+
+- name: "connector:automation"
+  description: Workflow and automation connectors (n8n, Zapier, etc.)
+  color: "0e8a16"
+
+- name: "connector:calendar"
+  description: Calendar and scheduling connectors (Cal.com, etc.)
+  color: "0e8a16"
+
 # ─── Priority ────────────────────────────────────────────────────────────────
 
 - name: "priority:critical"
@@ -207,3 +219,7 @@
 - name: blocked
   description: Waiting on an external dependency or decision
   color: "b60205"
+
+- name: connector request
+  description: Request for a new source or destination connector
+  color: "0e8a16"

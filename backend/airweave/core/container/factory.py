@@ -10,6 +10,8 @@ Design principles:
 - Testable: can unit test factory logic with mock settings
 """
 
+from typing import Optional
+
 from prometheus_client import CollectorRegistry
 
 from airweave.adapters.analytics.posthog import PostHogTracker
@@ -299,14 +301,15 @@ def _create_circuit_breaker() -> CircuitBreaker:
     return InMemoryCircuitBreaker(cooldown_seconds=120)
 
 
-def _create_ocr_provider(circuit_breaker: CircuitBreaker, settings: Settings) -> OcrProvider:
+def _create_ocr_provider(
+    circuit_breaker: CircuitBreaker, settings: Settings
+) -> Optional[OcrProvider]:
     """Create OCR provider with fallback chain.
 
     Chain order: Mistral (cloud) -> Docling (local service, if configured).
     Docling is only added when DOCLING_BASE_URL is set.
 
-    raises: ValueError if no OCR providers are available
-    returns: FallbackOcrProvider with the available OCR providers
+    Returns None with a warning when no providers are available.
     """
     try:
         mistral_ocr = MistralOcrAdapter()
@@ -327,7 +330,11 @@ def _create_ocr_provider(circuit_breaker: CircuitBreaker, settings: Settings) ->
             docling_ocr = None
 
     if not providers:
-        raise ValueError("No OCR providers available")
+        logger.warning(
+            "No OCR providers available — document processing will be disabled. "
+            "Set MISTRAL_API_KEY or DOCLING_BASE_URL to enable OCR."
+        )
+        return None
 
     logger.info(f"Creating FallbackOcrProvider with {len(providers)} providers: {providers}")
 

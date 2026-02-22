@@ -11,7 +11,7 @@ Design principles:
 """
 
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Optional
 
 from airweave.core.protocols import (
     CircuitBreaker,
@@ -89,9 +89,6 @@ class Container:
     # Circuit breaker for provider failover
     circuit_breaker: CircuitBreaker
 
-    # OCR provider (with fallback chain + circuit breaking)
-    ocr_provider: OcrProvider
-
     # Metrics (HTTP, agentic search, DB pool — via MetricsService facade)
     metrics: MetricsService
 
@@ -138,6 +135,10 @@ class Container:
     billing_webhook: BillingWebhookProtocol
 
     payment_gateway: PaymentGatewayProtocol
+
+    # OCR provider (with fallback chain + circuit breaking)
+    # Optional: None when no OCR backend (Mistral/Docling) is configured
+    ocr_provider: Optional[OcrProvider] = None
 
     # -----------------------------------------------------------------
     # Convenience methods

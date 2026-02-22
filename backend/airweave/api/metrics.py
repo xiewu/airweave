@@ -43,4 +43,5 @@ class MetricsServer:
         return web.Response(
             body=self._renderer.generate(),
             content_type=self._renderer.content_type,
+            charset=self._renderer.charset,
         )
