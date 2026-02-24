@@ -1,6 +1,6 @@
 """Source connection repository wrapping crud.source_connection."""
 
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from airweave import crud
 from airweave.api.context import ApiContext
+from airweave.db.unit_of_work import UnitOfWork
 from airweave.domains.source_connections.protocols import SourceConnectionRepositoryProtocol
 from airweave.domains.source_connections.types import ScheduleInfo, SourceConnectionStats
 from airweave.models.connection_init_session import ConnectionInitSession
@@ -61,3 +62,27 @@ class SourceConnectionRepository(SourceConnectionRepositoryProtocol):
             db, ctx=ctx, collection_id=collection_id, skip=skip, limit=limit
         )
         return [SourceConnectionStats.from_dict(d) for d in raw]
+
+    async def update(
+        self,
+        db: AsyncSession,
+        *,
+        db_obj: SourceConnection,
+        obj_in: dict[str, Any],
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> SourceConnection:
+        """Update a source connection."""
+        return await crud.source_connection.update(
+            db, db_obj=db_obj, obj_in=obj_in, ctx=ctx, uow=uow
+        )
+
+    async def remove(
+        self,
+        db: AsyncSession,
+        *,
+        id: UUID,
+        ctx: ApiContext,
+    ) -> Optional[SourceConnection]:
+        """Delete a source connection by ID."""
+        return await crud.source_connection.remove(db, id=id, ctx=ctx)

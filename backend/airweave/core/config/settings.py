@@ -179,6 +179,7 @@ class Settings(BaseSettings):
     TEMPORAL_NAMESPACE: str = "default"
     TEMPORAL_TASK_QUEUE: str = "airweave-sync-queue"
     TEMPORAL_DISABLE_SANDBOX: bool = False
+    TEMPORAL_SDK_METRICS_PORT: int = 9090
 
     # Health probe configuration
     HEALTH_CHECK_TIMEOUT: float = 5.0

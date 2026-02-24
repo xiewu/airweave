@@ -1,11 +1,12 @@
 """Fake source connection repository for testing."""
 
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from airweave.api.context import ApiContext
+from airweave.db.unit_of_work import UnitOfWork
 from airweave.domains.source_connections.types import ScheduleInfo, SourceConnectionStats
 from airweave.models.connection_init_session import ConnectionInitSession
 from airweave.models.source_connection import SourceConnection
@@ -83,3 +84,31 @@ class FakeSourceConnectionRepository:
         if collection_id is not None:
             stats = [s for s in stats if s.readable_collection_id == collection_id]
         return stats[skip : skip + limit]
+
+    async def update(
+        self,
+        db: AsyncSession,
+        *,
+        db_obj: SourceConnection,
+        obj_in: dict[str, Any],
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> SourceConnection:
+        """Update a source connection in the in-memory store."""
+        self._calls.append(("update", db, db_obj, obj_in, ctx, uow))
+        update_data = obj_in
+        for field, value in update_data.items():
+            setattr(db_obj, field, value)
+        self._store[db_obj.id] = db_obj
+        return db_obj
+
+    async def remove(
+        self,
+        db: AsyncSession,
+        *,
+        id: UUID,
+        ctx: ApiContext,
+    ) -> Optional[SourceConnection]:
+        """Remove a source connection from the in-memory store."""
+        self._calls.append(("remove", db, id, ctx))
+        return self._store.pop(id, None)

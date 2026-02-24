@@ -113,6 +113,10 @@ class SyncCursorRepositoryProtocol(Protocol):
 class SyncRecordServiceProtocol(Protocol):
     """Sync record management: create syncs and trigger runs."""
 
+    async def resolve_destination_ids(self, db: AsyncSession, ctx: ApiContext) -> List[UUID]:
+        """Resolve destination connection IDs based on feature flags."""
+        ...
+
     async def create_sync(
         self,
         db: AsyncSession,

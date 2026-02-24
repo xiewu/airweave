@@ -5,11 +5,13 @@ CRUD layer and services type-hint against BaseContext. Specialized contexts
 (ApiContext, SyncContext, CleanupContext) extend it with domain-specific fields.
 """
 
+import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
 from airweave import schemas
+from airweave.core.config import settings
 from airweave.core.logging import ContextualLogger
 
 if TYPE_CHECKING:
@@ -71,3 +73,19 @@ class BaseContext:
             True if enabled, False otherwise
         """
         return flag in self.organization.enabled_features
+
+    def to_serializable_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary for Temporal workflow payloads.
+
+        Subclasses (ApiContext) override this with richer data. The base
+        implementation provides the minimum needed by Temporal activities.
+        """
+        return {
+            "request_id": str(uuid.uuid4()),
+            "organization_id": str(self.organization.id),
+            "organization": self.organization.model_dump(mode="json"),
+            "user": None,
+            "auth_method": "api_key",
+            "auth_metadata": {},
+            "local_development": settings.LOCAL_DEVELOPMENT,
+        }

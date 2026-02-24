@@ -10,17 +10,24 @@ from airweave.core.exceptions import NotFoundException
 from airweave.domains.auth_provider.protocols import AuthProviderRegistryProtocol
 from airweave.domains.collections.protocols import CollectionRepositoryProtocol
 from airweave.domains.connections.protocols import ConnectionRepositoryProtocol
+from airweave.domains.oauth.protocols import OAuthRedirectSessionRepositoryProtocol
 from airweave.domains.source_connections.protocols import (
     ResponseBuilderProtocol,
+    SourceConnectionDeletionServiceProtocol,
     SourceConnectionRepositoryProtocol,
     SourceConnectionServiceProtocol,
+    SourceConnectionUpdateServiceProtocol,
 )
 from airweave.domains.sources.protocols import SourceRegistryProtocol
 from airweave.domains.syncs.protocols import SyncLifecycleServiceProtocol
 from airweave.models.source_connection import SourceConnection
 from airweave.schemas.source_connection import (
+    SourceConnection as SourceConnectionSchema,
+)
+from airweave.schemas.source_connection import (
     SourceConnectionJob,
     SourceConnectionListItem,
+    SourceConnectionUpdate,
 )
 
 
@@ -33,20 +40,27 @@ class SourceConnectionService(SourceConnectionServiceProtocol):
         sc_repo: SourceConnectionRepositoryProtocol,
         collection_repo: CollectionRepositoryProtocol,
         connection_repo: ConnectionRepositoryProtocol,
+        redirect_session_repo: OAuthRedirectSessionRepositoryProtocol,
         # Registries
         source_registry: SourceRegistryProtocol,
         auth_provider_registry: AuthProviderRegistryProtocol,
         # Helpers
         response_builder: ResponseBuilderProtocol,
         sync_lifecycle: SyncLifecycleServiceProtocol,
+        # Sub-services
+        update_service: SourceConnectionUpdateServiceProtocol,
+        deletion_service: SourceConnectionDeletionServiceProtocol,
     ) -> None:
         self.sc_repo = sc_repo
         self.collection_repo = collection_repo
         self.connection_repo = connection_repo
+        self._redirect_session_repo = redirect_session_repo
         self.source_registry = source_registry
         self.auth_provider_registry = auth_provider_registry
         self.response_builder = response_builder
         self._sync_lifecycle = sync_lifecycle
+        self._update_service = update_service
+        self._deletion_service = deletion_service
 
     async def get(self, db: AsyncSession, *, id: UUID, ctx: ApiContext) -> SourceConnection:
         """Get a source connection by ID."""
@@ -94,6 +108,16 @@ class SourceConnectionService(SourceConnectionServiceProtocol):
 
         return result
 
+    async def update(
+        self, db: AsyncSession, id: UUID, obj_in: SourceConnectionUpdate, ctx: ApiContext
+    ) -> SourceConnectionSchema:
+        """Update a source connection."""
+        return await self._update_service.update(db, id=id, obj_in=obj_in, ctx=ctx)
+
+    async def delete(self, db: AsyncSession, id: UUID, ctx: ApiContext) -> SourceConnectionSchema:
+        """Delete a source connection."""
+        return await self._deletion_service.delete(db, id=id, ctx=ctx)
+
     # ------------------------------------------------------------------
     # Sync lifecycle proxies
     # ------------------------------------------------------------------
@@ -132,3 +156,19 @@ class SourceConnectionService(SourceConnectionServiceProtocol):
         return await self._sync_lifecycle.cancel_job(
             db, source_connection_id=source_connection_id, job_id=job_id, ctx=ctx
         )
+
+    async def get_sync_id(self, db: AsyncSession, *, id: UUID, ctx: ApiContext) -> dict:
+        """Get the sync_id for a source connection."""
+        source_connection = await self.sc_repo.get(db, id=id, ctx=ctx)
+        if not source_connection:
+            raise NotFoundException("Source connection not found")
+        if not source_connection.sync_id:
+            raise NotFoundException("No sync found for this source connection")
+        return {"sync_id": str(source_connection.sync_id)}
+
+    async def get_redirect_url(self, db: AsyncSession, *, code: str) -> str:
+        """Resolve a short redirect code to its final OAuth authorization URL."""
+        redirect_info = await self._redirect_session_repo.get_by_code(db, code=code)
+        if not redirect_info:
+            raise NotFoundException("Authorization link expired or invalid")
+        return redirect_info.final_url

@@ -1,12 +1,13 @@
 """Protocols for source connection domain."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, List, Optional, Protocol
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from airweave.api.context import ApiContext
+from airweave.db.unit_of_work import UnitOfWork
 from airweave.domains.source_connections.types import ScheduleInfo, SourceConnectionStats
 from airweave.models.connection_init_session import ConnectionInitSession
 from airweave.models.source_connection import SourceConnection
@@ -62,6 +63,28 @@ class SourceConnectionRepositoryProtocol(Protocol):
         """Get source connections with complete stats."""
         ...
 
+    async def update(
+        self,
+        db: AsyncSession,
+        *,
+        db_obj: SourceConnection,
+        obj_in: dict[str, Any],
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> SourceConnection:
+        """Update a source connection."""
+        ...
+
+    async def remove(
+        self,
+        db: AsyncSession,
+        *,
+        id: UUID,
+        ctx: ApiContext,
+    ) -> Optional[SourceConnection]:
+        """Delete a source connection by ID."""
+        ...
+
 
 class ResponseBuilderProtocol(Protocol):
     """Builds API response schemas for source connections."""
@@ -84,6 +107,26 @@ class ResponseBuilderProtocol(Protocol):
 
     def map_sync_job(self, job: SyncJob, source_connection_id: UUID) -> SourceConnectionJob:
         """Convert sync job to SourceConnectionJob schema."""
+        ...
+
+
+class SourceConnectionDeletionServiceProtocol(Protocol):
+    """Deletes a source connection and all related data."""
+
+    async def delete(
+        self, db: AsyncSession, *, id: UUID, ctx: ApiContext
+    ) -> SourceConnectionSchema:
+        """Delete a source connection."""
+        ...
+
+
+class SourceConnectionUpdateServiceProtocol(Protocol):
+    """Updates a source connection."""
+
+    async def update(
+        self, db: AsyncSession, *, id: UUID, obj_in: SourceConnectionUpdate, ctx: ApiContext
+    ) -> SourceConnectionSchema:
+        """Update a source connection."""
         ...
 
 
@@ -153,4 +196,12 @@ class SourceConnectionServiceProtocol(Protocol):
         ctx: ApiContext,
     ) -> SourceConnectionJob:
         """Cancel a running sync job."""
+        ...
+
+    async def get_sync_id(self, db: AsyncSession, *, id: UUID, ctx: ApiContext) -> dict:
+        """Get the sync_id for a source connection."""
+        ...
+
+    async def get_redirect_url(self, db: AsyncSession, *, code: str) -> str:
+        """Resolve a short redirect code to its final OAuth authorization URL."""
         ...

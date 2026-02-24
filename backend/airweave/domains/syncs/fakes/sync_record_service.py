@@ -18,6 +18,7 @@ class FakeSyncRecordService:
         self._calls: list[tuple] = []
         self._create_result: Optional[Tuple[schemas.Sync, Optional[schemas.SyncJob]]] = None
         self._trigger_result: Optional[Tuple[schemas.Sync, schemas.SyncJob]] = None
+        self._resolve_dest_ids: Optional[List[UUID]] = None
         self._should_raise: Optional[Exception] = None
 
     def set_create_result(
@@ -30,9 +31,28 @@ class FakeSyncRecordService:
         """Configure trigger_sync_run return value."""
         self._trigger_result = (sync, sync_job)
 
+    def set_resolve_dest_ids(self, ids: List[UUID]) -> None:
+        """Configure resolve_destination_ids return value."""
+        self._resolve_dest_ids = ids
+
     def set_error(self, error: Exception) -> None:
         """Make all subsequent calls raise this error."""
         self._should_raise = error
+
+    async def resolve_destination_ids(
+        self,
+        db: AsyncSession,
+        ctx: ApiContext,
+    ) -> List[UUID]:
+        """Record call and return canned result."""
+        self._calls.append(("resolve_destination_ids",))
+        if self._should_raise:
+            raise self._should_raise
+        if self._resolve_dest_ids is None:
+            from airweave.core.constants.reserved_ids import NATIVE_VESPA_UUID
+
+            return [NATIVE_VESPA_UUID]
+        return self._resolve_dest_ids
 
     async def create_sync(
         self,

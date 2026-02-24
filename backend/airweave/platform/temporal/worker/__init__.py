@@ -54,11 +54,19 @@ class TemporalWorker:
         only make sense inside a Temporal worker OS process.
         """
         from prometheus_client import CollectorRegistry
+        from temporalio.runtime import PrometheusConfig, Runtime, TelemetryConfig
 
         from airweave.adapters.metrics import PrometheusMetricsRenderer, PrometheusWorkerMetrics
         from airweave.platform.temporal.worker_metrics import worker_metrics as metrics_registry
 
         self._config = config
+        self._runtime = Runtime(
+            telemetry=TelemetryConfig(
+                metrics=PrometheusConfig(
+                    bind_address=f"0.0.0.0:{config.sdk_metrics_port}",
+                ),
+            ),
+        )
         self._worker: Worker | None = None
         self._state = WorkerState()
 
@@ -82,7 +90,7 @@ class TemporalWorker:
         # Connect to Temporal
         from airweave.platform.temporal.client import temporal_client
 
-        client = await temporal_client.get_client()
+        client = await temporal_client.get_client(runtime=self._runtime)
         logger.info(f"Starting Temporal worker on task queue: {self._config.task_queue}")
 
         # Create worker

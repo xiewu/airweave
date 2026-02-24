@@ -24,6 +24,7 @@ from airweave.api.deps import Inject
 from airweave.api.router import TrailingSlashRouter
 from airweave.core.context_cache_service import context_cache
 from airweave.core.exceptions import InvalidStateError, NotFoundException
+from airweave.domains.source_connections.protocols import SourceConnectionServiceProtocol
 from airweave.core.organization_service import organization_service
 from airweave.core.protocols.payment import PaymentGatewayProtocol
 from airweave.core.shared_models import FeatureFlag as FeatureFlagEnum
@@ -1924,6 +1925,7 @@ async def admin_delete_sync(
     sync_id: UUID,
     db: AsyncSession = Depends(deps.get_db),
     ctx: ApiContext = Depends(deps.get_context),
+    sc_service: SourceConnectionServiceProtocol = Inject(SourceConnectionServiceProtocol),
 ) -> dict:
     """Admin-only: Delete a sync and all related data.
 
@@ -1948,7 +1950,6 @@ async def admin_delete_sync(
     """
     from sqlalchemy import select as sa_select
 
-    from airweave.core.source_connection_service import source_connection_service
     from airweave.models.source_connection import SourceConnection
     from airweave.models.sync import Sync
 
@@ -1979,7 +1980,7 @@ async def admin_delete_sync(
 
     # Use the existing source connection delete logic which handles all cleanup
     try:
-        await source_connection_service.delete(
+        await sc_service.delete(
             db,
             id=source_conn.id,
             ctx=sync_org_ctx,
