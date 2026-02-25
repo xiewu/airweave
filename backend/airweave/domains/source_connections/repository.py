@@ -96,6 +96,17 @@ class SourceConnectionRepository(SourceConnectionRepositoryProtocol):
             db, db_obj=db_obj, obj_in=obj_in, ctx=ctx, uow=uow
         )
 
+    async def create(
+        self,
+        db: AsyncSession,
+        *,
+        obj_in: dict[str, Any],
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> SourceConnection:
+        """Create a source connection."""
+        return await crud.source_connection.create(db, obj_in=obj_in, ctx=ctx, uow=uow)
+
     async def remove(
         self,
         db: AsyncSession,

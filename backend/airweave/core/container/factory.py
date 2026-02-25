@@ -57,6 +57,7 @@ from airweave.domains.oauth.repository import (
     OAuthRedirectSessionRepository,
     OAuthSourceRepository,
 )
+from airweave.domains.source_connections.create import SourceConnectionCreationService
 from airweave.domains.source_connections.delete import SourceConnectionDeletionService
 from airweave.domains.source_connections.repository import SourceConnectionRepository
 from airweave.domains.source_connections.response import ResponseBuilder
@@ -195,6 +196,23 @@ def create_container(settings: Settings) -> Container:
         response_builder=sync_deps["response_builder"],
         temporal_schedule_service=sync_deps["temporal_schedule_service"],
     )
+    create_service = SourceConnectionCreationService(
+        sc_repo=source_deps["sc_repo"],
+        collection_repo=source_deps["collection_repo"],
+        connection_repo=source_deps["conn_repo"],
+        credential_repo=source_deps["cred_repo"],
+        source_registry=source_deps["source_registry"],
+        source_validation=source_validation,
+        source_lifecycle=source_deps["source_lifecycle_service"],
+        sync_lifecycle=sync_deps["sync_lifecycle"],
+        sync_record_service=sync_deps["sync_record_service"],
+        response_builder=sync_deps["response_builder"],
+        oauth1_service=source_deps["oauth1_service"],
+        oauth2_service=source_deps["oauth2_service"],
+        credential_encryptor=encryptor,
+        temporal_workflow_service=sync_deps["temporal_workflow_service"],
+        event_bus=event_bus,
+    )
     source_connection_service = SourceConnectionService(
         sc_repo=source_deps["sc_repo"],
         collection_repo=source_deps["collection_repo"],
@@ -204,6 +222,7 @@ def create_container(settings: Settings) -> Container:
         auth_provider_registry=source_deps["auth_provider_registry"],
         response_builder=sync_deps["response_builder"],
         sync_lifecycle=sync_deps["sync_lifecycle"],
+        create_service=create_service,
         update_service=update_service,
         deletion_service=deletion_service,
     )

@@ -85,6 +85,17 @@ class SourceConnectionRepositoryProtocol(Protocol):
         """Update a source connection."""
         ...
 
+    async def create(
+        self,
+        db: AsyncSession,
+        *,
+        obj_in: dict[str, Any],
+        ctx: ApiContext,
+        uow: Optional[UnitOfWork] = None,
+    ) -> SourceConnection:
+        """Create a source connection."""
+        ...
+
     async def remove(
         self,
         db: AsyncSession,
@@ -137,6 +148,16 @@ class SourceConnectionUpdateServiceProtocol(Protocol):
         self, db: AsyncSession, *, id: UUID, obj_in: SourceConnectionUpdate, ctx: ApiContext
     ) -> SourceConnectionSchema:
         """Update a source connection."""
+        ...
+
+
+class SourceConnectionCreateServiceProtocol(Protocol):
+    """Creates source connections across supported auth flows."""
+
+    async def create(
+        self, db: AsyncSession, *, obj_in: SourceConnectionCreate, ctx: ApiContext
+    ) -> SourceConnectionSchema:
+        """Create a source connection."""
         ...
 
 

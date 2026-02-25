@@ -158,7 +158,7 @@ async def create(
     source_connection_in: schemas.SourceConnectionCreate,
     ctx: ApiContext = Depends(deps.get_context),
     guard_rail: GuardRailService = Depends(deps.get_guard_rail_service),
-    event_bus: EventBus = Inject(EventBus),
+    sc_service: SourceConnectionServiceProtocol = Inject(SourceConnectionServiceProtocol),
 ) -> schemas.SourceConnection:
     """Create a new source connection."""
     # Check if organization is allowed to create a source connection
@@ -169,25 +169,11 @@ async def create(
     if source_connection_in.sync_immediately:
         await guard_rail.is_allowed(ActionType.ENTITIES)
 
-    result = await source_connection_service.create(
+    result = await sc_service.create(
         db,
         obj_in=source_connection_in,
         ctx=ctx,
     )
-
-    # Publish source_connection.created event
-    try:
-        await event_bus.publish(
-            SourceConnectionLifecycleEvent.created(
-                organization_id=ctx.organization.id,
-                source_connection_id=result.id,
-                source_type=result.short_name,
-                collection_readable_id=result.readable_collection_id,
-                is_authenticated=result.is_authenticated,
-            )
-        )
-    except Exception as e:
-        ctx.logger.warning(f"Failed to publish source_connection.created event: {e}")
 
     return result
 
