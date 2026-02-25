@@ -22,9 +22,11 @@ class FakeSourceConnectionRepository:
         self._schedule_info: dict[UUID, ScheduleInfo] = {}
         self._init_sessions: dict[UUID, ConnectionInitSession] = {}
         self._stats: List[SourceConnectionStats] = []
+        self._sync_ids_by_collection: dict[str, List[UUID]] = {}
         self._calls: list[tuple[Any, ...]] = []
 
     def seed(self, id: UUID, obj: SourceConnection) -> None:
+        """Seed a source connection by ID."""
         self._store[id] = obj
 
     def seed_by_sync_id(self, sync_id: UUID, obj: SourceConnection) -> None:
@@ -42,6 +44,12 @@ class FakeSourceConnectionRepository:
     def seed_stats(self, stats: List[SourceConnectionStats]) -> None:
         """Seed the stats list returned by get_multi_with_stats."""
         self._stats = list(stats)
+
+    def seed_sync_ids_for_collection(
+        self, readable_collection_id: str, sync_ids: List[UUID]
+    ) -> None:
+        """Seed sync IDs returned by get_sync_ids_for_collection."""
+        self._sync_ids_by_collection[readable_collection_id] = list(sync_ids)
 
     async def get(self, db: AsyncSession, id: UUID, ctx: ApiContext) -> Optional[SourceConnection]:
         """Return seeded source connection by ID."""
@@ -84,6 +92,19 @@ class FakeSourceConnectionRepository:
         if collection_id is not None:
             stats = [s for s in stats if s.readable_collection_id == collection_id]
         return stats[skip : skip + limit]
+
+    async def get_sync_ids_for_collection(
+        self,
+        db: AsyncSession,
+        *,
+        organization_id: UUID,
+        readable_collection_id: str,
+    ) -> List[UUID]:
+        """Return seeded sync IDs for a collection."""
+        self._calls.append(
+            ("get_sync_ids_for_collection", db, organization_id, readable_collection_id)
+        )
+        return self._sync_ids_by_collection.get(readable_collection_id, [])
 
     async def update(
         self,

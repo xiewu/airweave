@@ -63,6 +63,16 @@ class SourceConnectionRepositoryProtocol(Protocol):
         """Get source connections with complete stats."""
         ...
 
+    async def get_sync_ids_for_collection(
+        self,
+        db: AsyncSession,
+        *,
+        organization_id: UUID,
+        readable_collection_id: str,
+    ) -> List[UUID]:
+        """Get all sync IDs for source connections in a collection."""
+        ...
+
     async def update(
         self,
         db: AsyncSession,
