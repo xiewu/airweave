@@ -45,6 +45,12 @@ class SourceConnectionRepositoryProtocol(Protocol):
         """Get schedule info for a source connection."""
         ...
 
+    async def get_by_init_session(
+        self, db: AsyncSession, *, init_session_id: UUID, ctx: ApiContext
+    ) -> Optional[SourceConnection]:
+        """Get source connection by init session ID within org scope."""
+        ...
+
     async def get_init_session_with_redirect(
         self, db: AsyncSession, session_id: UUID, ctx: ApiContext
     ) -> Optional[ConnectionInitSession]:

@@ -35,6 +35,14 @@ class SourceConnectionRepository(SourceConnectionRepositoryProtocol):
         """Get schedule info for a source connection."""
         return await crud.source_connection.get_schedule_info(db, source_connection)
 
+    async def get_by_init_session(
+        self, db: AsyncSession, *, init_session_id: UUID, ctx: ApiContext
+    ) -> Optional[SourceConnection]:
+        """Get source connection by init session ID within org scope."""
+        return await crud.source_connection.get_by_query_and_org(
+            db, ctx=ctx, connection_init_session_id=init_session_id
+        )
+
     async def get_init_session_with_redirect(
         self, db: AsyncSession, session_id: UUID, ctx: ApiContext
     ) -> Optional[ConnectionInitSession]:

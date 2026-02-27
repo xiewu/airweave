@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from airweave.api.context import ApiContext
 from airweave.core.exceptions import NotFoundException
@@ -14,6 +15,8 @@ from airweave.core.shared_models import AuthMethod
 from airweave.domains.collections.fakes.repository import FakeCollectionRepository
 from airweave.domains.connections.fakes.repository import FakeConnectionRepository
 from airweave.domains.credentials.fakes.repository import FakeIntegrationCredentialRepository
+from airweave.domains.oauth.fakes.flow_service import FakeOAuthFlowService
+from airweave.domains.oauth.types import OAuthBrowserInitiationResult
 from airweave.domains.source_connections.create import SourceConnectionCreationService
 from airweave.domains.source_connections.fakes.repository import FakeSourceConnectionRepository
 from airweave.domains.source_connections.fakes.response import FakeResponseBuilder
@@ -86,8 +89,7 @@ def _service(entry) -> SourceConnectionCreationService:
         sync_lifecycle=FakeSyncLifecycleService(),
         sync_record_service=FakeSyncRecordService(),
         response_builder=FakeResponseBuilder(),
-        oauth1_service=AsyncMock(),
-        oauth2_service=AsyncMock(),
+        oauth_flow_service=FakeOAuthFlowService(),
         credential_encryptor=MagicMock(),
         temporal_workflow_service=FakeTemporalWorkflowService(),
         event_bus=AsyncMock(),
@@ -254,25 +256,14 @@ async def test_create_oauth2_init_session_contract(monkeypatch):
     svc._source_validation.validate_config = MagicMock(return_value={"instance_url": "acme"})
     svc._extract_template_configs = MagicMock(return_value={"instance_url": "acme"})
     svc._collection_repo.seed_readable("col-1", MagicMock(readable_id="col-1"))
-    svc._oauth2_service.generate_auth_url_with_redirect = AsyncMock(
-        return_value=("https://provider/auth", "verifier-123")
-    )
-    from airweave.platform.auth.schemas import OAuth2Settings
-
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.integration_settings.get_by_short_name",
-        AsyncMock(
-            return_value=OAuth2Settings(
-                integration_short_name="github",
-                url="https://provider/authorize",
-                backend_url="https://provider/token",
-                grant_type="authorization_code",
-                client_id="platform-client-id",
-                client_secret="platform-client-secret",
-                content_type="application/x-www-form-urlencoded",
-                client_credential_location="payload",
-            )
-        ),
+    svc._oauth_flow_service.seed_initiate_browser_flow_result(
+        OAuthBrowserInitiationResult(
+            provider_auth_url="https://provider/auth",
+            client_id=None,
+            client_secret=None,
+            oauth_client_mode="platform_default",
+            additional_overrides={"code_verifier": "verifier-123"},
+        )
     )
 
     shell_sc = MagicMock(id=uuid4(), connection_init_session_id=None, is_authenticated=False)
@@ -286,12 +277,7 @@ async def test_create_oauth2_init_session_contract(monkeypatch):
     async def _fake_create_redirect_session(db, provider_auth_url, ctx, uow):
         return uuid4()
 
-    async def _fake_create_init_session(db, obj_in, state, ctx, uow, **kwargs):
-        captured.update(kwargs)
-        return MagicMock(id=uuid4())
-
     monkeypatch.setattr(svc, "_create_redirect_session", _fake_create_redirect_session)
-    monkeypatch.setattr(svc, "_create_init_session", _fake_create_init_session)
 
     class _FakeUOW:
         def __init__(self, db):
@@ -319,6 +305,8 @@ async def test_create_oauth2_init_session_contract(monkeypatch):
     )
     await svc._create_with_oauth_browser(db, obj_in=obj_in, entry=entry, ctx=_ctx())
 
+    captured.update(svc._oauth_flow_service._last_create_init_session_kwargs)
+
     assert captured["template_configs"] == {"instance_url": "acme"}
     assert captured["additional_overrides"]["code_verifier"] == "verifier-123"
     assert "redirect_session_id" in captured
@@ -329,29 +317,22 @@ async def test_create_oauth1_init_session_contract(monkeypatch):
     svc = _service(entry)
     svc._source_validation.validate_config = MagicMock(return_value={})
     svc._collection_repo.seed_readable("col-1", MagicMock(readable_id="col-1"))
-    svc._oauth1_service.get_request_token = AsyncMock(
-        return_value=SimpleNamespace(oauth_token="req-token", oauth_token_secret="req-secret")
-    )
-    svc._oauth1_service.build_authorization_url = MagicMock(return_value="https://provider/oauth1-auth")
-
     shell_sc = MagicMock(id=uuid4(), connection_init_session_id=None, is_authenticated=False)
     svc._sc_repo.create = AsyncMock(return_value=shell_sc)
     svc._response_builder.build_response = AsyncMock(return_value=MagicMock(id=shell_sc.id))
-
-    from airweave.platform.auth.schemas import OAuth1Settings
-
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.integration_settings.get_by_short_name",
-        AsyncMock(
-            return_value=OAuth1Settings(
-                integration_short_name="github",
-                request_token_url="https://provider/request-token",
-                authorization_url="https://provider/authorize",
-                access_token_url="https://provider/access-token",
-                consumer_key="platform-key",
-                consumer_secret="platform-secret",
-            )
-        ),
+    svc._oauth_flow_service.seed_initiate_browser_flow_result(
+        OAuthBrowserInitiationResult(
+            provider_auth_url="https://provider/oauth1-auth",
+            client_id="custom-key",
+            client_secret="custom-secret",
+            oauth_client_mode="byoc_nested",
+            additional_overrides={
+                "oauth_token": "req-token",
+                "oauth_token_secret": "req-secret",
+                "consumer_key": "custom-key",
+                "consumer_secret": "custom-secret",
+            },
+        )
     )
 
     from airweave.domains.source_connections import create as create_module
@@ -361,12 +342,7 @@ async def test_create_oauth1_init_session_contract(monkeypatch):
     async def _fake_create_redirect_session(db, provider_auth_url, ctx, uow):
         return uuid4()
 
-    async def _fake_create_init_session(db, obj_in, state, ctx, uow, **kwargs):
-        captured.update(kwargs)
-        return MagicMock(id=uuid4())
-
     monkeypatch.setattr(svc, "_create_redirect_session", _fake_create_redirect_session)
-    monkeypatch.setattr(svc, "_create_init_session", _fake_create_init_session)
 
     class _FakeUOW:
         def __init__(self, db):
@@ -396,6 +372,8 @@ async def test_create_oauth1_init_session_contract(monkeypatch):
         ),
     )
     await svc._create_with_oauth_browser(db, obj_in=obj_in, entry=entry, ctx=_ctx())
+
+    captured.update(svc._oauth_flow_service._last_create_init_session_kwargs)
 
     overrides = captured["additional_overrides"]
     assert overrides["oauth_token"] == "req-token"
@@ -516,14 +494,6 @@ def test_extract_template_configs_maps_validation_error_to_http_422():
 
 def test_extract_template_configs_returns_none_for_missing_config_ref():
     entry = SimpleNamespace(config_ref=None)
-    assert SourceConnectionCreationService._extract_template_configs(entry, {"a": 1}) is None
-
-
-def test_extract_template_configs_returns_none_without_template_method():
-    class _Config:
-        pass
-
-    entry = SimpleNamespace(config_ref=_Config)
     assert SourceConnectionCreationService._extract_template_configs(entry, {"a": 1}) is None
 
 
@@ -665,87 +635,54 @@ async def test_create_with_oauth_browser_rejects_non_oauth_browser_auth():
         await svc._create_with_oauth_browser(AsyncMock(), obj_in=obj_in, entry=_entry(), ctx=_ctx())
 
 
-async def test_create_with_oauth_browser_rejects_non_oauth1_settings(monkeypatch):
-    entry = _entry(oauth_type="oauth1")
+@pytest.mark.parametrize(
+    "oauth_type,error,status_code,detail_match",
+    [
+        ("oauth1", HTTPException(status_code=400, detail="Source 'github' is not OAuth1"), 400, "is not OAuth1"),
+        (
+            "access_only",
+            HTTPException(status_code=400, detail="Source 'github' is not OAuth2"),
+            400,
+            "is not OAuth2",
+        ),
+        (
+            "access_only",
+            HTTPException(
+                status_code=422,
+                detail="Template config fields missing or empty: subdomain",
+            ),
+            422,
+            "Template config fields missing or empty",
+        ),
+    ],
+)
+async def test_create_with_oauth_browser_propagates_initiation_errors(
+    oauth_type, error, status_code, detail_match
+):
+    entry = _entry(oauth_type=oauth_type)
     svc = _service(entry)
     svc._source_validation.validate_config = MagicMock(return_value={})
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.integration_settings.get_by_short_name",
-        AsyncMock(return_value=SimpleNamespace()),
-    )
+    svc._extract_template_configs = MagicMock(return_value=None)
+    svc._oauth_flow_service.seed_initiate_browser_flow_error(error)
     obj_in = SourceConnectionCreate(short_name="github", readable_collection_id="col-1")
-    with pytest.raises(HTTPException, match="is not OAuth1"):
+    with pytest.raises(HTTPException, match=detail_match) as exc_info:
         await svc._create_with_oauth_browser(AsyncMock(), obj_in=obj_in, entry=entry, ctx=_ctx())
+    assert exc_info.value.status_code == status_code
 
 
-async def test_create_with_oauth_browser_rejects_non_oauth2_settings(monkeypatch):
-    entry = _entry(oauth_type="access_only")
-    svc = _service(entry)
-    svc._source_validation.validate_config = MagicMock(return_value={})
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.integration_settings.get_by_short_name",
-        AsyncMock(return_value=SimpleNamespace()),
-    )
-    obj_in = SourceConnectionCreate(short_name="github", readable_collection_id="col-1")
-    with pytest.raises(HTTPException, match="is not OAuth2"):
-        await svc._create_with_oauth_browser(AsyncMock(), obj_in=obj_in, entry=entry, ctx=_ctx())
-
-
-async def test_create_with_oauth_browser_maps_oauth2_value_error_to_422(monkeypatch):
+async def test_create_with_oauth_browser_rejects_missing_collection():
     entry = _entry(oauth_type="access_only")
     svc = _service(entry)
     svc._source_validation.validate_config = MagicMock(return_value={})
     svc._extract_template_configs = MagicMock(return_value=None)
-    svc._oauth2_service.generate_auth_url_with_redirect = AsyncMock(
-        side_effect=ValueError("Template config fields missing or empty: subdomain")
-    )
-    from airweave.platform.auth.schemas import OAuth2Settings
-
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.integration_settings.get_by_short_name",
-        AsyncMock(
-            return_value=OAuth2Settings(
-                integration_short_name="github",
-                url="https://provider/authorize",
-                backend_url="https://provider/token",
-                grant_type="authorization_code",
-                client_id="platform-client-id",
-                client_secret="platform-client-secret",
-                content_type="application/x-www-form-urlencoded",
-                client_credential_location="payload",
-            )
-        ),
-    )
-    obj_in = SourceConnectionCreate(short_name="github", readable_collection_id="col-1")
-    with pytest.raises(HTTPException) as exc_info:
-        await svc._create_with_oauth_browser(AsyncMock(), obj_in=obj_in, entry=entry, ctx=_ctx())
-    assert exc_info.value.status_code == 422
-
-
-async def test_create_with_oauth_browser_rejects_missing_collection(monkeypatch):
-    entry = _entry(oauth_type="access_only")
-    svc = _service(entry)
-    svc._source_validation.validate_config = MagicMock(return_value={})
-    svc._extract_template_configs = MagicMock(return_value=None)
-    svc._oauth2_service.generate_auth_url_with_redirect = AsyncMock(
-        return_value=("https://provider/auth", "verifier-123")
-    )
-    from airweave.platform.auth.schemas import OAuth2Settings
-
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.integration_settings.get_by_short_name",
-        AsyncMock(
-            return_value=OAuth2Settings(
-                integration_short_name="github",
-                url="https://provider/authorize",
-                backend_url="https://provider/token",
-                grant_type="authorization_code",
-                client_id="platform-client-id",
-                client_secret="platform-client-secret",
-                content_type="application/x-www-form-urlencoded",
-                client_credential_location="payload",
-            )
-        ),
+    svc._oauth_flow_service.seed_initiate_browser_flow_result(
+        OAuthBrowserInitiationResult(
+            provider_auth_url="https://provider/auth",
+            client_id=None,
+            client_secret=None,
+            oauth_client_mode="platform_default",
+            additional_overrides={"code_verifier": "verifier-123"},
+        )
     )
     obj_in = SourceConnectionCreate(short_name="github", readable_collection_id="missing-col")
     with pytest.raises(NotFoundException, match="Collection not found"):
@@ -776,16 +713,11 @@ async def test_create_with_direct_auth_delegates_to_authenticated_connection():
     assert result is expected
 
 
-async def test_create_redirect_session_returns_created_id(monkeypatch):
+async def test_create_redirect_session_returns_created_id():
     svc = _service(_entry())
     redirect_id = uuid4()
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.crud.redirect_session.generate_unique_code",
-        AsyncMock(return_value="abcd1234"),
-    )
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.crud.redirect_session.create",
-        AsyncMock(return_value=SimpleNamespace(id=redirect_id)),
+    svc._oauth_flow_service.create_proxy_url = AsyncMock(
+        return_value=("https://api.example.com/source-connections/authorize/abcd1234", NOW, redirect_id)
     )
     result = await svc._create_redirect_session(
         AsyncMock(),
@@ -796,82 +728,118 @@ async def test_create_redirect_session_returns_created_id(monkeypatch):
     assert result == redirect_id
 
 
-async def test_create_init_session_rejects_partial_custom_credentials():
+async def test_create_with_oauth_browser_rejects_partial_custom_credentials():
+    with pytest.raises(ValidationError, match="requires both client_id and client_secret"):
+        OAuthBrowserAuthentication(client_id="only-id")
+
+
+async def test_create_with_oauth_browser_rejects_empty_client_secret():
+    with pytest.raises(ValidationError, match="requires both client_id and client_secret"):
+        OAuthBrowserAuthentication(client_id="id", client_secret="")
+
+
+async def test_create_with_oauth_browser_sets_platform_default_overrides(monkeypatch):
     svc = _service(_entry())
-    obj_in = SimpleNamespace(
-        short_name="github",
-        readable_collection_id="col-1",
-        redirect_url=None,
-        authentication=SimpleNamespace(client_id="only-id", client_secret=None),
-        model_dump=lambda **kwargs: {
-            "short_name": "github",
-            "readable_collection_id": "col-1",
-        },
-    )
-    with pytest.raises(HTTPException, match="both client_id and client_secret"):
-        await svc._create_init_session(
-            AsyncMock(),
-            obj_in=obj_in,
-            state="state",
-            ctx=_ctx(),
-            uow=SimpleNamespace(),
+    svc._source_validation.validate_config = MagicMock(return_value={})
+    svc._collection_repo.seed_readable("col-1", MagicMock(readable_id="col-1"))
+    svc._oauth_flow_service.seed_initiate_browser_flow_result(
+        OAuthBrowserInitiationResult(
+            provider_auth_url="https://provider/auth",
+            client_id=None,
+            client_secret=None,
+            oauth_client_mode="platform_default",
+            additional_overrides={},
         )
-
-
-async def test_create_init_session_sets_platform_default_overrides(monkeypatch):
-    svc = _service(_entry())
-    captured = {}
-
-    async def _fake_create(*args, **kwargs):
-        captured.update(kwargs["obj_in"])
-        return SimpleNamespace(id=uuid4())
-
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.crud.connection_init_session.create",
-        _fake_create,
     )
+    svc._sc_repo.create = AsyncMock(
+        return_value=MagicMock(id=uuid4(), connection_init_session_id=None, is_authenticated=False)
+    )
+    svc._response_builder.build_response = AsyncMock(return_value=MagicMock(id=uuid4()))
 
+    from airweave.domains.source_connections import create as create_module
+
+    class _FakeUOW:
+        def __init__(self, db):
+            self.session = db
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(create_module, "UnitOfWork", _FakeUOW)
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.refresh = AsyncMock()
     obj_in = SourceConnectionCreate(short_name="github", readable_collection_id="col-1")
-    await svc._create_init_session(
-        AsyncMock(),
-        obj_in=obj_in,
-        state="state",
-        ctx=_ctx(),
-        uow=SimpleNamespace(),
-    )
-    assert captured["overrides"]["oauth_client_mode"] == "platform_default"
-    assert captured["overrides"]["client_id"] is None
-    assert captured["overrides"]["client_secret"] is None
+    await svc._create_with_oauth_browser(db, obj_in=obj_in, entry=_entry(), ctx=_ctx())
+
+    kwargs = svc._oauth_flow_service._last_create_init_session_kwargs
+    assert kwargs["oauth_client_mode"] == "platform_default"
+    assert kwargs["client_id"] is None
+    assert kwargs["client_secret"] is None
 
 
-async def test_create_init_session_sets_byoc_nested_for_oauth1(monkeypatch):
+async def test_create_with_oauth_browser_sets_byoc_nested_for_oauth1(monkeypatch):
     svc = _service(_entry())
-    captured = {}
-
-    async def _fake_create(*args, **kwargs):
-        captured.update(kwargs["obj_in"])
-        return SimpleNamespace(id=uuid4())
-
-    monkeypatch.setattr(
-        "airweave.domains.source_connections.create.crud.connection_init_session.create",
-        _fake_create,
+    svc._source_validation.validate_config = MagicMock(return_value={})
+    svc._collection_repo.seed_readable("col-1", MagicMock(readable_id="col-1"))
+    svc._oauth_flow_service.seed_initiate_browser_flow_result(
+        OAuthBrowserInitiationResult(
+            provider_auth_url="https://provider/auth",
+            client_id="ck",
+            client_secret="cs",
+            oauth_client_mode="byoc_nested",
+            additional_overrides={
+                "oauth_token": "req-token",
+                "oauth_token_secret": "req-secret",
+                "consumer_key": "ck",
+                "consumer_secret": "cs",
+            },
+        )
     )
+    svc._sc_repo.create = AsyncMock(
+        return_value=MagicMock(id=uuid4(), connection_init_session_id=None, is_authenticated=False)
+    )
+    svc._response_builder.build_response = AsyncMock(return_value=MagicMock(id=uuid4()))
+
+    from airweave.domains.source_connections import create as create_module
+
+    class _FakeUOW:
+        def __init__(self, db):
+            self.session = db
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def commit(self):
+            return None
+
+    monkeypatch.setattr(create_module, "UnitOfWork", _FakeUOW)
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.refresh = AsyncMock()
 
     obj_in = SourceConnectionCreate(
         short_name="github",
         readable_collection_id="col-1",
         authentication=OAuthBrowserAuthentication(consumer_key="ck", consumer_secret="cs"),
     )
-    await svc._create_init_session(
-        AsyncMock(),
-        obj_in=obj_in,
-        state="state",
-        ctx=_ctx(),
-        uow=SimpleNamespace(),
-    )
-    assert captured["overrides"]["oauth_client_mode"] == "byoc_nested"
-    assert captured["overrides"]["client_id"] == "ck"
-    assert captured["overrides"]["client_secret"] == "cs"
+    await svc._create_with_oauth_browser(db, obj_in=obj_in, entry=_entry(oauth_type="oauth1"), ctx=_ctx())
+
+    kwargs = svc._oauth_flow_service._last_create_init_session_kwargs
+    assert kwargs["oauth_client_mode"] == "byoc_nested"
+    assert kwargs["client_id"] == "ck"
+    assert kwargs["client_secret"] == "cs"
 
 async def test_trigger_sync_workflow_publishes_event_before_workflow():
     svc = _service(_entry())

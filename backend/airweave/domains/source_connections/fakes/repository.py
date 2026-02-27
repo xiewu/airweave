@@ -70,6 +70,16 @@ class FakeSourceConnectionRepository:
         self._calls.append(("get_schedule_info", db, source_connection))
         return self._schedule_info.get(source_connection.id)
 
+    async def get_by_init_session(
+        self, db: AsyncSession, *, init_session_id: UUID, ctx: ApiContext
+    ) -> Optional[SourceConnection]:
+        """Get source connection by init session ID within org scope."""
+        self._calls.append(("get_by_init_session", db, init_session_id, ctx))
+        for sc in self._store.values():
+            if getattr(sc, "connection_init_session_id", None) == init_session_id:
+                return sc
+        return None
+
     async def get_init_session_with_redirect(
         self, db: AsyncSession, session_id: UUID, ctx: ApiContext
     ) -> Optional[ConnectionInitSession]:
