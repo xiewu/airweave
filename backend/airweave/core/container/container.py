@@ -33,6 +33,12 @@ from airweave.domains.collections.protocols import (
 )
 from airweave.domains.connections.protocols import ConnectionRepositoryProtocol
 from airweave.domains.credentials.protocols import IntegrationCredentialRepositoryProtocol
+from airweave.domains.embedders.protocols import (
+    DenseEmbedderProtocol,
+    DenseEmbedderRegistryProtocol,
+    SparseEmbedderProtocol,
+    SparseEmbedderRegistryProtocol,
+)
 from airweave.domains.oauth.protocols import (
     OAuth1ServiceProtocol,
     OAuth2ServiceProtocol,
@@ -152,6 +158,14 @@ class Container:
     billing_webhook: BillingWebhookProtocol
 
     payment_gateway: PaymentGatewayProtocol
+
+    # Embedder registries (static reference data, built once at startup)
+    dense_embedder_registry: DenseEmbedderRegistryProtocol
+    sparse_embedder_registry: SparseEmbedderRegistryProtocol
+
+    # Embedder instances (deployment-wide singletons from domains/embedders/)
+    dense_embedder: DenseEmbedderProtocol
+    sparse_embedder: SparseEmbedderProtocol
 
     # OCR provider (with fallback chain + circuit breaking)
     # Optional: None when no OCR backend (Mistral/Docling) is configured

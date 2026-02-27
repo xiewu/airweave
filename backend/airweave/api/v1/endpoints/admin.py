@@ -22,16 +22,19 @@ from airweave.api import deps
 from airweave.api.context import ApiContext
 from airweave.api.deps import Inject
 from airweave.api.router import TrailingSlashRouter
+from airweave.core.context import SystemContext
 from airweave.core.context_cache_service import context_cache
 from airweave.core.exceptions import InvalidStateError, NotFoundException
-from airweave.domains.source_connections.protocols import SourceConnectionServiceProtocol
 from airweave.core.organization_service import organization_service
 from airweave.core.protocols.payment import PaymentGatewayProtocol
+from airweave.core.shared_models import AuthMethod
 from airweave.core.shared_models import FeatureFlag as FeatureFlagEnum
 from airweave.core.temporal_service import temporal_service
 from airweave.crud.crud_organization_billing import organization_billing
 from airweave.db.unit_of_work import UnitOfWork
 from airweave.domains.billing.operations import BillingOperations
+from airweave.domains.embedders.protocols import DenseEmbedderProtocol, SparseEmbedderProtocol
+from airweave.domains.source_connections.protocols import SourceConnectionServiceProtocol
 from airweave.integrations.auth0_management import auth0_management_client
 from airweave.models.organization import Organization
 from airweave.models.organization_billing import OrganizationBilling
@@ -678,7 +681,7 @@ async def upgrade_organization_to_enterprise(  # noqa: C901
         await db.flush()
 
         # Create system context for billing operations
-        internal_ctx = ApiContext.for_system(org_schema, "admin_upgrade")
+        internal_ctx = SystemContext(org_schema, auth_method=AuthMethod.INTERNAL_SYSTEM)
 
         # Create Stripe customer
         customer = await payment_gw.create_customer(
@@ -1180,7 +1183,7 @@ async def resync_with_execution_config(
     if not collection:
         raise NotFoundException(f"Collection {source_conn.readable_collection_id} not found")
 
-    collection_schema = schemas.Collection.model_validate(collection, from_attributes=True)
+    collection_schema = schemas.CollectionRecord.model_validate(collection, from_attributes=True)
 
     # Get the Connection object (bypass org filtering)
     connection_result = await db.execute(
@@ -1255,6 +1258,8 @@ async def admin_search_collection(
         AdminSearchDestination.QDRANT,
         description="Search destination: 'qdrant' (default) or 'vespa'",
     ),
+    dense_embedder: DenseEmbedderProtocol = Inject(DenseEmbedderProtocol),
+    sparse_embedder: SparseEmbedderProtocol = Inject(SparseEmbedderProtocol),
 ) -> schemas.SearchResponse:
     """Admin-only: Search any collection regardless of organization.
 
@@ -1269,6 +1274,8 @@ async def admin_search_collection(
         db: Database session
         ctx: API context
         destination: Search destination ('qdrant' or 'vespa')
+        dense_embedder: Domain dense embedder for generating neural embeddings
+        sparse_embedder: Domain sparse embedder for generating BM25 embeddings
 
     Returns:
         SearchResponse with results
@@ -1286,6 +1293,8 @@ async def admin_search_collection(
         search_request=search_request,
         db=db,
         ctx=ctx,
+        dense_embedder=dense_embedder,
+        sparse_embedder=sparse_embedder,
         destination=destination.value,
     )
 
@@ -1305,6 +1314,8 @@ async def admin_search_collection_as_user(
         AdminSearchDestination.VESPA,
         description="Search destination: 'qdrant' or 'vespa' (default)",
     ),
+    dense_embedder: DenseEmbedderProtocol = Inject(DenseEmbedderProtocol),
+    sparse_embedder: SparseEmbedderProtocol = Inject(SparseEmbedderProtocol),
 ) -> schemas.SearchResponse:
     """Admin-only: Search collection with access control for a specific user.
 
@@ -1318,6 +1329,8 @@ async def admin_search_collection_as_user(
         db: Database session
         ctx: API context
         destination: Search destination ('qdrant' or 'vespa')
+        dense_embedder: Domain dense embedder for generating neural embeddings
+        sparse_embedder: Domain sparse embedder for generating BM25 embeddings
 
     Returns:
         SearchResponse with results filtered by user's access permissions.
@@ -1336,6 +1349,8 @@ async def admin_search_collection_as_user(
         db=db,
         ctx=ctx,
         user_principal=user_principal,
+        dense_embedder=dense_embedder,
+        sparse_embedder=sparse_embedder,
         destination=destination.value,
     )
 
@@ -1431,109 +1446,6 @@ async def admin_delete_cursor(
         "deleted": deleted,
         "message": "Cursor deleted. Next sync will be a full sync.",
     }
-
-
-async def _build_admin_search_context(
-    db: AsyncSession,
-    collection,
-    readable_id: str,
-    search_request: schemas.SearchRequest,
-    destination,
-    ctx: ApiContext,
-):
-    """Build search context with custom destination for admin search.
-
-    This mirrors the factory.build() but allows overriding the destination.
-    """
-    from airweave.search.factory import (
-        SearchContext,
-        factory,
-    )
-
-    # Apply defaults and validate
-    params = factory._apply_defaults_and_validate(search_request)
-
-    # Get collection sources
-    federated_sources = await factory.get_federated_sources(db, collection, ctx)
-    has_federated_sources = bool(federated_sources)
-    has_vector_sources = await factory._has_vector_sources(db, collection, ctx)
-
-    # Determine destination capabilities
-    requires_embedding = getattr(destination, "requires_client_embedding", True)
-    supports_temporal = getattr(destination, "supports_temporal_relevance", True)
-
-    ctx.logger.info(
-        f"[AdminSearch] Destination: {destination.__class__.__name__}, "
-        f"requires_client_embedding: {requires_embedding}, "
-        f"supports_temporal_relevance: {supports_temporal}"
-    )
-
-    if not has_federated_sources and not has_vector_sources:
-        raise ValueError("Collection has no sources")
-
-    vector_size = collection.vector_size
-    if vector_size is None:
-        raise ValueError(f"Collection {collection.readable_id} has no vector_size set.")
-
-    # Select providers for operations
-    api_keys = factory._get_available_api_keys()
-    providers = factory._create_provider_for_each_operation(
-        api_keys,
-        params,
-        has_federated_sources,
-        has_vector_sources,
-        ctx,
-        vector_size,
-        requires_client_embedding=requires_embedding,
-    )
-
-    # Create event emitter
-    from airweave.search.emitter import EventEmitter
-
-    emitter = EventEmitter(request_id=ctx.request_id, stream=False)
-
-    # Get temporal supporting sources if needed
-    temporal_supporting_sources = None
-    if params["temporal_weight"] > 0 and has_vector_sources and supports_temporal:
-        try:
-            temporal_supporting_sources = await factory._get_temporal_supporting_sources(
-                db, collection, ctx, emitter
-            )
-        except Exception as e:
-            raise ValueError(f"Failed to check temporal relevance support: {e}") from e
-    elif params["temporal_weight"] > 0 and not supports_temporal:
-        ctx.logger.info(
-            "[AdminSearch] Skipping temporal relevance: destination does not support it"
-        )
-        temporal_supporting_sources = []
-
-    # Build operations with custom destination
-    operations = factory._build_operations(
-        params,
-        providers,
-        federated_sources,
-        has_vector_sources,
-        search_request,
-        temporal_supporting_sources,
-        vector_size,
-        destination=destination,
-        requires_client_embedding=requires_embedding,
-        db=db,
-        ctx=ctx,
-    )
-
-    return SearchContext(
-        request_id=ctx.request_id,
-        collection_id=collection.id,
-        readable_collection_id=readable_id,
-        stream=False,
-        vector_size=vector_size,
-        offset=params["offset"],
-        limit=params["limit"],
-        emitter=emitter,
-        query=search_request.query,
-        **operations,
-    )
 
 
 @router.get("/syncs", response_model=List[AdminSyncInfo])
@@ -1941,6 +1853,7 @@ async def admin_delete_sync(
         sync_id: The sync ID to delete
         db: Database session
         ctx: API context
+        sc_service: Source connection service for deletion logic
 
     Returns:
         Success message with deleted sync ID
