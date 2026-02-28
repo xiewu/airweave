@@ -9,17 +9,20 @@ import asyncio
 import json
 
 from fastapi import Depends, HTTPException, Path
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from airweave.api import deps
 from airweave.api.context import ApiContext
 from airweave.api.deps import Inject
 from airweave.api.router import TrailingSlashRouter
-from airweave.core.guard_rail_service import GuardRailService
-from airweave.core.protocols import MetricsService
-from airweave.core.pubsub import core_pubsub
-from airweave.core.shared_models import ActionType, FeatureFlag
+from airweave.core.events.sync import QueryProcessedEvent
+from airweave.core.protocols import EventBus, MetricsService, PubSub
+from airweave.core.shared_models import FeatureFlag
+from airweave.db.session import get_db
 from airweave.domains.embedders.protocols import DenseEmbedderProtocol, SparseEmbedderProtocol
+from airweave.domains.usage.protocols import UsageLimitCheckerProtocol
+from airweave.domains.usage.types import ActionType
 from airweave.search.agentic_search.core.agent import AgenticSearchAgent
 from airweave.search.agentic_search.emitter import (
     AgenticSearchLoggingEmitter,
@@ -36,8 +39,10 @@ router = TrailingSlashRouter()
 async def agentic_search(
     request: AgenticSearchRequest,
     readable_id: str = Path(..., description="The unique readable identifier of the collection"),
+    db: AsyncSession = Depends(get_db),
     ctx: ApiContext = Depends(deps.get_context),
-    guard_rail: GuardRailService = Depends(deps.get_guard_rail_service),
+    usage_checker: UsageLimitCheckerProtocol = Inject(UsageLimitCheckerProtocol),
+    event_bus: EventBus = Inject(EventBus),
     metrics_service: MetricsService = Inject(MetricsService),
     dense_embedder: DenseEmbedderProtocol = Inject(DenseEmbedderProtocol),
     sparse_embedder: SparseEmbedderProtocol = Inject(SparseEmbedderProtocol),
@@ -49,7 +54,7 @@ async def agentic_search(
             detail="AGENTIC_SEARCH feature not enabled for this organization",
         )
 
-    await guard_rail.is_allowed(ActionType.QUERIES)
+    await usage_checker.is_allowed(db, ctx.organization.id, ActionType.QUERIES)
 
     services = await AgenticSearchServices.create(
         ctx, readable_id, dense_embedder=dense_embedder, sparse_embedder=sparse_embedder
@@ -61,7 +66,7 @@ async def agentic_search(
 
         response = await agent.run(readable_id, request, is_streaming=False)
 
-        await guard_rail.increment(ActionType.QUERIES)
+        await event_bus.publish(QueryProcessedEvent(organization_id=ctx.organization.id))
 
         return response
     finally:
@@ -72,9 +77,12 @@ async def agentic_search(
 async def stream_agentic_search(  # noqa: C901 - streaming orchestration is acceptable
     request: AgenticSearchRequest,
     readable_id: str = Path(..., description="The unique readable identifier of the collection"),
+    db: AsyncSession = Depends(get_db),
     ctx: ApiContext = Depends(deps.get_context),
-    guard_rail: GuardRailService = Depends(deps.get_guard_rail_service),
+    usage_checker: UsageLimitCheckerProtocol = Inject(UsageLimitCheckerProtocol),
+    event_bus: EventBus = Inject(EventBus),
     metrics_service: MetricsService = Inject(MetricsService),
+    pubsub: PubSub = Inject(PubSub),
     dense_embedder: DenseEmbedderProtocol = Inject(DenseEmbedderProtocol),
     sparse_embedder: SparseEmbedderProtocol = Inject(SparseEmbedderProtocol),
 ) -> StreamingResponse:
@@ -98,11 +106,10 @@ async def stream_agentic_search(  # noqa: C901 - streaming orchestration is acce
         f"mode={request.mode}, filter={request.filter}"
     )
 
-    await guard_rail.is_allowed(ActionType.QUERIES)
+    await usage_checker.is_allowed(db, ctx.organization.id, ActionType.QUERIES)
 
-    # Subscribe to events before starting the search
-    pubsub = await core_pubsub.subscribe("agentic_search", request_id)
-    emitter = AgenticSearchPubSubEmitter(request_id)
+    ps = await pubsub.subscribe("agentic_search", request_id)
+    emitter = AgenticSearchPubSubEmitter(request_id, pubsub=pubsub)
 
     async def _run_search() -> None:
         """Run the agentic search in background.
@@ -145,7 +152,7 @@ async def stream_agentic_search(  # noqa: C901 - streaming orchestration is acce
     async def event_stream():  # noqa: C901 - streaming loop is acceptable
         """Generate SSE events from PubSub messages."""
         try:
-            async for message in pubsub.listen():
+            async for message in ps.listen():
                 if message["type"] == "message":
                     data = message["data"]
 
@@ -163,7 +170,9 @@ async def stream_agentic_search(  # noqa: C901 - streaming orchestration is acce
                         if event_type == "done":
                             ctx.logger.info(f"[AgenticSearchStream] Done event for {request_id}")
                             try:
-                                await guard_rail.increment(ActionType.QUERIES)
+                                await event_bus.publish(
+                                    QueryProcessedEvent(organization_id=ctx.organization.id)
+                                )
                             except Exception:
                                 pass
                             break
@@ -197,7 +206,7 @@ async def stream_agentic_search(  # noqa: C901 - streaming orchestration is acce
                 except Exception:
                     pass
             try:
-                await pubsub.close()
+                await ps.close()
                 ctx.logger.info(
                     f"[AgenticSearchStream] Closed pubsub for agentic_search:{request_id}"
                 )

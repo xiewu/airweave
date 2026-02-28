@@ -7,12 +7,13 @@ Only the API layer creates these via deps.get_context().
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import ConfigDict
 
 from airweave import schemas
 from airweave.core.context import BaseContext
+from airweave.core.logging import logger as root_logger
 from airweave.core.shared_models import AuthMethod
 
 
@@ -69,6 +70,32 @@ class ApiContext(BaseContext):
     def is_user_auth(self) -> bool:
         """Whether this is user authentication (Auth0)."""
         return self.auth_method == AuthMethod.AUTH0
+
+    @classmethod
+    def for_system(
+        cls,
+        organization: schemas.Organization,
+        source: str = "system",
+    ) -> "ApiContext":
+        """Create a system context for internal/background operations.
+
+        Args:
+            organization: The organization to create context for.
+            source: Identifier for the subsystem creating the context.
+        """
+        request_id = str(uuid4())
+        return cls(
+            request_id=request_id,
+            auth_method=AuthMethod.INTERNAL_SYSTEM,
+            organization=organization,
+            user=None,
+            logger=root_logger.with_context(
+                request_id=request_id,
+                organization_id=str(organization.id),
+                auth_method=AuthMethod.INTERNAL_SYSTEM.value,
+                source=source,
+            ),
+        )
 
     def to_serializable_dict(self) -> Dict[str, Any]:
         """Convert to a serializable dictionary for Temporal workflow payloads.

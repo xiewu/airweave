@@ -112,6 +112,10 @@ class SourceConnectionRepositoryProtocol(Protocol):
         """Delete a source connection by ID."""
         ...
 
+    async def count_by_organization(self, db: AsyncSession, organization_id: UUID) -> int:
+        """Count source connections belonging to an organization."""
+        ...
+
 
 class ResponseBuilderProtocol(Protocol):
     """Builds API response schemas for source connections."""
@@ -241,4 +245,8 @@ class SourceConnectionServiceProtocol(Protocol):
 
     async def get_redirect_url(self, db: AsyncSession, *, code: str) -> str:
         """Resolve a short redirect code to its final OAuth authorization URL."""
+        ...
+
+    async def count_by_organization(self, db: AsyncSession, organization_id: UUID) -> int:
+        """Count source connections belonging to an organization."""
         ...

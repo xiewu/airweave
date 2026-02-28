@@ -804,6 +804,29 @@ class StubConfig(SourceConfig):
         return value
 
 
+class IncrementalStubConfig(SourceConfig):
+    """Incremental stub source configuration for testing continuous sync.
+
+    Generates deterministic entities with cursor-based incremental support.
+    The source tracks which entities have been synced and only yields new
+    ones on subsequent syncs. The entity_count can be increased between
+    syncs to simulate new data appearing.
+    """
+
+    entity_count: int = Field(
+        default=5,
+        title="Entity Count",
+        description="Total number of entities available. Increase between syncs to add new data.",
+        ge=1,
+        le=100000,
+    )
+    seed: int = Field(
+        default=42,
+        title="Random Seed",
+        description="Random seed for reproducible content generation",
+    )
+
+
 class FileStubConfig(SourceConfig):
     """File stub source configuration for testing file converters.
 

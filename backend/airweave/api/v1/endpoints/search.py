@@ -23,11 +23,12 @@ from airweave.api import deps
 from airweave.api.context import ApiContext
 from airweave.api.deps import Inject
 from airweave.api.router import TrailingSlashRouter
-from airweave.core.guard_rail_service import GuardRailService
-from airweave.core.pubsub import core_pubsub
-from airweave.core.shared_models import ActionType
+from airweave.core.events.sync import QueryProcessedEvent
+from airweave.core.protocols import EventBus, PubSub
 from airweave.db.session import AsyncSessionLocal
 from airweave.domains.embedders.protocols import DenseEmbedderProtocol, SparseEmbedderProtocol
+from airweave.domains.usage.protocols import UsageLimitCheckerProtocol
+from airweave.domains.usage.types import ActionType
 from airweave.schemas.errors import (
     NotFoundErrorResponse,
     RateLimitErrorResponse,
@@ -105,13 +106,15 @@ async def search_get_legacy(
         json_schema_extra={"example": 0.3},
     ),
     db: AsyncSession = Depends(deps.get_db),
-    guard_rail: GuardRailService = Depends(deps.get_guard_rail_service),
+    usage_checker: UsageLimitCheckerProtocol = Inject(UsageLimitCheckerProtocol),
+    event_bus: EventBus = Inject(EventBus),
     ctx: ApiContext = Depends(deps.get_context),
+    pubsub: PubSub = Inject(PubSub),
     dense_embedder: DenseEmbedderProtocol = Inject(DenseEmbedderProtocol),
     sparse_embedder: SparseEmbedderProtocol = Inject(SparseEmbedderProtocol),
 ) -> LegacySearchResponse:
     """Legacy GET search endpoint for backwards compatibility."""
-    await guard_rail.is_allowed(ActionType.QUERIES)
+    await usage_checker.is_allowed(db, ctx.organization.id, ActionType.QUERIES)
 
     # Add deprecation warning headers
     response.headers["X-API-Deprecation"] = "true"
@@ -134,7 +137,6 @@ async def search_get_legacy(
     # Convert to new format
     new_request = convert_legacy_request_to_new(legacy_request)
 
-    # Call new search service
     new_response = await service.search(
         request_id=ctx.request_id,
         readable_collection_id=readable_id,
@@ -142,6 +144,7 @@ async def search_get_legacy(
         stream=False,
         db=db,
         ctx=ctx,
+        pubsub=pubsub,
         dense_embedder=dense_embedder,
         sparse_embedder=sparse_embedder,
     )
@@ -149,7 +152,7 @@ async def search_get_legacy(
     # Convert back to legacy format
     legacy_response = convert_new_response_to_legacy(new_response, response_type)
 
-    await guard_rail.increment(ActionType.QUERIES)
+    await event_bus.publish(QueryProcessedEvent(organization_id=ctx.organization.id))
 
     return legacy_response
 
@@ -191,13 +194,15 @@ async def search(
     ),
     search_request: Union[SearchRequest, LegacySearchRequest] = ...,
     db: AsyncSession = Depends(deps.get_db),
+    usage_checker: UsageLimitCheckerProtocol = Inject(UsageLimitCheckerProtocol),
+    event_bus: EventBus = Inject(EventBus),
     ctx: ApiContext = Depends(deps.get_context),
-    guard_rail: GuardRailService = Depends(deps.get_guard_rail_service),
+    pubsub: PubSub = Inject(PubSub),
     dense_embedder: DenseEmbedderProtocol = Inject(DenseEmbedderProtocol),
     sparse_embedder: SparseEmbedderProtocol = Inject(SparseEmbedderProtocol),
 ) -> Union[SearchResponse, LegacySearchResponse]:
     """Search your collection with AI-powered semantic search."""
-    await guard_rail.is_allowed(ActionType.QUERIES)
+    await usage_checker.is_allowed(db, ctx.organization.id, ActionType.QUERIES)
 
     ctx.logger.info(f"Starting search for collection '{readable_id}'")
 
@@ -226,7 +231,6 @@ async def search(
             "temporal_relevance has been removed and was ignored"
         )
 
-    # Execute search with new service (always use Vespa for public endpoints)
     search_response = await service.search(
         request_id=ctx.request_id,
         readable_collection_id=readable_id,
@@ -234,13 +238,14 @@ async def search(
         stream=False,
         db=db,
         ctx=ctx,
+        pubsub=pubsub,
         dense_embedder=dense_embedder,
         sparse_embedder=sparse_embedder,
         destination_override="vespa",
     )
 
     ctx.logger.info(f"Search completed for collection '{readable_id}'")
-    await guard_rail.increment(ActionType.QUERIES)
+    await event_bus.publish(QueryProcessedEvent(organization_id=ctx.organization.id))
 
     # Convert response back to legacy format if needed
     if is_legacy:
@@ -256,8 +261,10 @@ async def stream_search_collection_advanced(  # noqa: C901 - streaming orchestra
     ),
     search_request: Union[SearchRequest, LegacySearchRequest] = ...,
     db: AsyncSession = Depends(deps.get_db),
+    usage_checker: UsageLimitCheckerProtocol = Inject(UsageLimitCheckerProtocol),
+    event_bus: EventBus = Inject(EventBus),
     ctx: ApiContext = Depends(deps.get_context),
-    guard_rail: GuardRailService = Depends(deps.get_guard_rail_service),
+    pubsub: PubSub = Inject(PubSub),
     dense_embedder: DenseEmbedderProtocol = Inject(DenseEmbedderProtocol),
     sparse_embedder: SparseEmbedderProtocol = Inject(SparseEmbedderProtocol),
 ) -> StreamingResponse:
@@ -271,14 +278,13 @@ async def stream_search_collection_advanced(  # noqa: C901 - streaming orchestra
         f"[SearchStream] Starting stream for collection '{readable_id}' id={request_id}"
     )
 
-    await guard_rail.is_allowed(ActionType.QUERIES)
+    await usage_checker.is_allowed(db, ctx.organization.id, ActionType.QUERIES)
 
-    # Convert legacy request if needed
     if isinstance(search_request, LegacySearchRequest):
         ctx.logger.debug("Processing legacy streaming search request")
         search_request = convert_legacy_request_to_new(search_request)
 
-    pubsub = await core_pubsub.subscribe("search", request_id)
+    ps = await pubsub.subscribe("search", request_id)
 
     async def _publish_stream_error(
         *, message: str, transient: bool, detail: str | None = None
@@ -290,7 +296,7 @@ async def stream_search_collection_advanced(  # noqa: C901 - streaming orchestra
         }
         if detail:
             payload["detail"] = detail
-        await core_pubsub.publish("search", request_id, payload)
+        await pubsub.publish("search", request_id, payload)
 
     async def _run_search() -> None:
         try:
@@ -303,6 +309,7 @@ async def stream_search_collection_advanced(  # noqa: C901 - streaming orchestra
                     stream=True,
                     db=search_db,
                     ctx=ctx,
+                    pubsub=pubsub,
                     dense_embedder=dense_embedder,
                     sparse_embedder=sparse_embedder,
                     destination_override="vespa",
@@ -341,7 +348,7 @@ async def stream_search_collection_advanced(  # noqa: C901 - streaming orchestra
             last_heartbeat = asyncio.get_event_loop().time()
             heartbeat_interval = 30
 
-            async for message in pubsub.listen():
+            async for message in ps.listen():
                 now = asyncio.get_event_loop().time()
                 if now - last_heartbeat > heartbeat_interval:
                     heartbeat_event = {
@@ -363,7 +370,9 @@ async def stream_search_collection_advanced(  # noqa: C901 - streaming orchestra
                                 "Closing stream"
                             )
                             try:
-                                await guard_rail.increment(ActionType.QUERIES)
+                                await event_bus.publish(
+                                    QueryProcessedEvent(organization_id=ctx.organization.id)
+                                )
                             except Exception:
                                 pass
                             break
@@ -404,7 +413,7 @@ async def stream_search_collection_advanced(  # noqa: C901 - streaming orchestra
                 except Exception:
                     pass
             try:
-                await pubsub.close()
+                await ps.close()
                 ctx.logger.info(
                     f"[SearchStream] Closed pubsub subscription for search:{request_id}"
                 )

@@ -3,8 +3,9 @@
 The factory is responsible for:
 1. Building SyncContext (data) via SyncContextBuilder
 2. Building live services (source, destinations, trackers) via sub-builders
-3. Assembling SyncRuntime from the services
-4. Wiring everything into SyncOrchestrator
+3. Building per-sync event emitter with subscribers (progress relay, billing)
+4. Assembling SyncRuntime from the services
+5. Wiring everything into SyncOrchestrator
 """
 
 import asyncio
@@ -15,10 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from airweave import schemas
 from airweave.core.config import settings
+
+# TODO: Remove this once we have pipe our DI framework to the sync factory
+from airweave.core.container import container
 from airweave.core.context import BaseContext
-from airweave.core.logging import logger
+from airweave.core.logging import LoggerConfigurator, logger
 from airweave.domains.embedders.protocols import DenseEmbedderProtocol, SparseEmbedderProtocol
 from airweave.platform.builders import SyncContextBuilder
+from airweave.platform.builders.tracking import TrackingContextBuilder
 from airweave.platform.contexts.runtime import SyncRuntime
 from airweave.platform.sync.access_control_pipeline import AccessControlPipeline
 from airweave.platform.sync.actions import (
@@ -32,6 +37,7 @@ from airweave.platform.sync.entity_pipeline import EntityPipeline
 from airweave.platform.sync.handlers import ACPostgresHandler
 from airweave.platform.sync.orchestrator import SyncOrchestrator
 from airweave.platform.sync.pipeline.acl_membership_tracker import ACLMembershipTracker
+from airweave.platform.sync.pipeline.entity_tracker import EntityTracker
 from airweave.platform.sync.stream import AsyncSourceStream
 from airweave.platform.sync.worker_pool import AsyncWorkerPool
 
@@ -82,7 +88,7 @@ class SyncFactory:
         source_connection_id = await SyncContextBuilder.get_source_connection_id(db, sync, ctx)
 
         # Step 2: Build services in parallel
-        source_result, destinations_result, tracking_result = await asyncio.gather(
+        source_result, destinations_result, entity_tracker_result = await asyncio.gather(
             cls._build_source(
                 db=db,
                 sync=sync,
@@ -109,7 +115,6 @@ class SyncFactory:
 
         source, cursor = source_result
         destinations, entity_map = destinations_result
-        entity_tracker, state_publisher, guard_rail = tracking_result
 
         # Step 3: Build SyncContext (data only)
         sync_context = await SyncContextBuilder.build(
@@ -133,26 +138,25 @@ class SyncFactory:
             dense_embedder=dense_embedder,
             sparse_embedder=sparse_embedder,
             destinations=destinations,
-            entity_tracker=entity_tracker,
-            state_publisher=state_publisher,
-            guard_rail=guard_rail,
+            entity_tracker=entity_tracker_result,
+            event_bus=container.event_bus,
+            usage_checker=container.usage_checker,
         )
 
         logger.debug(f"Context + runtime built in {time.time() - init_start:.2f}s")
 
-        # Step 5: Build pipelines using runtime services
+        # Step 6: Build pipelines using runtime services
         dispatcher = EntityDispatcherBuilder.build(
             destinations=runtime.destinations,
             execution_config=resolved_config,
             logger=sync_context.logger,
-            guard_rail=runtime.guard_rail,
         )
 
         action_resolver = EntityActionResolver(entity_map=sync_context.entity_map)
 
         entity_pipeline = EntityPipeline(
             entity_tracker=runtime.entity_tracker,
-            state_publisher=runtime.state_publisher,
+            event_bus=container.event_bus,
             action_resolver=action_resolver,
             action_dispatcher=dispatcher,
         )
@@ -175,7 +179,7 @@ class SyncFactory:
             logger=sync_context.logger,
         )
 
-        # Step 6: Create orchestrator
+        # Step 7: Create orchestrator
         orchestrator = SyncOrchestrator(
             entity_pipeline=entity_pipeline,
             worker_pool=worker_pool,
@@ -245,11 +249,14 @@ class SyncFactory:
         )
 
     @classmethod
-    async def _build_tracking(cls, db, sync, sync_job, ctx):
-        """Build tracking components. Returns (entity_tracker, state_publisher, guard_rail)."""
-        from airweave.core.logging import LoggerConfigurator
-        from airweave.platform.builders.tracking import TrackingContextBuilder
-
+    async def _build_tracking(
+        cls,
+        db: AsyncSession,
+        sync: schemas.Sync,
+        sync_job: schemas.SyncJob,
+        ctx: BaseContext,
+    ) -> EntityTracker:
+        """Build tracking components. Returns EntityTracker."""
         track_logger = LoggerConfigurator.configure_logger(
             "airweave.platform.sync.tracking_build",
             dimensions={

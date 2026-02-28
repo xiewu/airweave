@@ -15,7 +15,7 @@ from airweave.api.context import ApiContext
 from airweave.api.deps import Inject
 from airweave.api.router import TrailingSlashRouter
 from airweave.core.logging import logger
-from airweave.core.pubsub import core_pubsub
+from airweave.core.protocols import PubSub
 from airweave.core.sync_service import sync_service
 from airweave.domains.embedders.protocols import DenseEmbedderProtocol, SparseEmbedderProtocol
 
@@ -95,7 +95,6 @@ async def create_sync(
     --------
         sync (schemas.Sync): The created sync
     """
-    # Create the sync and sync job - kinda, not really, we'll do that in the background
     sync, sync_job = await sync_service.create_and_run_sync(db=db, sync_in=sync_in, ctx=ctx)
     source_connection = await crud.source_connection.get(
         db=db, id=sync_in.source_connection_id, ctx=ctx
@@ -109,15 +108,14 @@ async def create_sync(
         source_connection, from_attributes=True
     )
 
-    # If job was created and should run immediately, start it in background
     if sync_job and sync_in.run_immediately:
         background_tasks.add_task(
             sync_service.run,
-            sync=sync,
-            sync_job=sync_job,
-            collection=collection,
-            source_connection=source_connection,
-            ctx=ctx,
+            sync,
+            sync_job,
+            collection,
+            source_connection,
+            ctx,
             dense_embedder=dense_embedder,
             sparse_embedder=sparse_embedder,
         )
@@ -198,7 +196,8 @@ async def get_sync_job(
 @router.get("/job/{job_id}/subscribe")
 async def subscribe_sync_job(
     job_id: UUID,
-    ctx: ApiContext = Depends(deps.get_context),  # Standard dependency injection
+    ctx: ApiContext = Depends(deps.get_context),
+    pubsub: PubSub = Inject(PubSub),
 ) -> StreamingResponse:
     """Server-Sent Events (SSE) endpoint to subscribe to a sync job's progress.
 
@@ -206,7 +205,7 @@ async def subscribe_sync_job(
     -----
         job_id: The ID of the job to subscribe to
         ctx: The API context
-        db: The database session
+        pubsub: PubSub adapter for event streaming
 
     Returns:
     --------
@@ -217,8 +216,7 @@ async def subscribe_sync_job(
     # Track active SSE connections
     connection_id = f"{ctx}:{job_id}:{asyncio.get_event_loop().time()}"
 
-    # Get a new pubsub instance subscribed to this job
-    pubsub = await core_pubsub.subscribe("sync_job", job_id)
+    ps = await pubsub.subscribe("sync_job", job_id)
 
     async def event_stream() -> AsyncGenerator[str, None]:
         try:
@@ -229,7 +227,7 @@ async def subscribe_sync_job(
             last_heartbeat = asyncio.get_event_loop().time()
             heartbeat_interval = 30  # seconds
 
-            async for message in pubsub.listen():
+            async for message in ps.listen():
                 # Check if we need to send a heartbeat
                 current_time = asyncio.get_event_loop().time()
                 if current_time - last_heartbeat > heartbeat_interval:
@@ -249,9 +247,8 @@ async def subscribe_sync_job(
             logger.error(f"SSE error for job {job_id}: {str(e)}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
-            # Clean up when SSE connection closes
             try:
-                await pubsub.close()
+                await ps.close()
             except Exception as e:
                 logger.warning(f"Error closing pubsub for job {job_id}: {e}")
 
@@ -272,6 +269,7 @@ async def subscribe_sync_job(
 async def subscribe_entity_state(
     job_id: UUID,
     ctx: ApiContext = Depends(deps.get_context),
+    pubsub: PubSub = Inject(PubSub),
 ) -> StreamingResponse:
     """SSE endpoint for total entity state updates during sync.
 
@@ -283,6 +281,7 @@ async def subscribe_entity_state(
     -----
         job_id: The ID of the job to subscribe to
         ctx: The API context
+        pubsub: PubSub adapter for event streaming
 
     Returns:
     --------
@@ -294,35 +293,27 @@ async def subscribe_entity_state(
     channel = f"sync_job_state:{job_id}"
     logger.info(f"📡 Subscribing to Redis channel: {channel}")
 
-    # Get a new pubsub instance subscribed to entity state for this job
-    # Using the new core_pubsub with "sync_job_state" namespace
-    from airweave.core.pubsub import core_pubsub
-
-    pubsub = await core_pubsub.subscribe("sync_job_state", job_id)
+    ps = await pubsub.subscribe("sync_job_state", job_id)
 
     async def event_stream() -> AsyncGenerator[str, None]:
         try:
-            logger.info(f"🚀 Starting entity state event stream for job {job_id}")
+            logger.info(f"Starting entity state event stream for job {job_id}")
 
-            # Send initial connection event
             yield f"data: {json.dumps({'type': 'connected', 'job_id': str(job_id)})}\n\n"
 
-            # Track heartbeat timing
             last_heartbeat = asyncio.get_event_loop().time()
-            heartbeat_interval = 30  # seconds
+            heartbeat_interval = 30
 
-            async for message in pubsub.listen():
-                # Send heartbeat to keep connection alive
+            async for message in ps.listen():
                 current_time = asyncio.get_event_loop().time()
                 if current_time - last_heartbeat > heartbeat_interval:
-                    logger.debug(f"💓 Sending heartbeat for job {job_id}")
                     yield 'data: {"type": "heartbeat"}\n\n'
                     last_heartbeat = current_time
 
                 if message["type"] == "message":
                     yield f"data: {message['data']}\n\n"
                 elif message["type"] == "subscribe":
-                    logger.info(f"✅ SSE subscribed to entity state channel for job {job_id}")
+                    logger.info(f"SSE subscribed to entity state channel for job {job_id}")
 
         except asyncio.CancelledError:
             logger.info(f"SSE entity state connection cancelled for job {job_id}")
@@ -330,9 +321,8 @@ async def subscribe_entity_state(
             logger.error(f"SSE entity state error for job {job_id}: {str(e)}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
-            # Clean up
             try:
-                await pubsub.close()
+                await ps.close()
             except Exception as e:
                 logger.warning(f"Error closing entity state pubsub for job {job_id}: {e}")
 

@@ -7,6 +7,8 @@ Each class declares its dependencies in __init__, making them:
 - Wired at worker startup via container
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import sys
@@ -15,16 +17,15 @@ import traceback
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
-
-from airweave.core.redis_client import redis_client
-
-if TYPE_CHECKING:
-    from airweave.core.protocols import EventBus
 
 from temporalio import activity
 
+from airweave import schemas
+from airweave.core.context import BaseContext
+from airweave.core.protocols import EventBus
+from airweave.core.redis_client import redis_client
 from airweave.domains.embedders.protocols import DenseEmbedderProtocol, SparseEmbedderProtocol
 
 # =============================================================================
@@ -47,7 +48,7 @@ class RunSyncActivity:
     existing workflows. Future: migrate to IDs-only.
     """
 
-    event_bus: "EventBus"
+    event_bus: EventBus
     dense_embedder: DenseEmbedderProtocol
     sparse_embedder: SparseEmbedderProtocol
 
@@ -380,13 +381,13 @@ class RunSyncActivity:
 
     async def _run_sync_task(
         self,
-        sync,
-        sync_job,
-        collection,
-        connection,
-        ctx,
-        access_token,
-        force_full_sync=False,
+        sync: schemas.Sync,
+        sync_job: schemas.SyncJob,
+        collection: schemas.Collection,
+        connection: schemas.Connection,
+        ctx: BaseContext,
+        access_token: Optional[str] = None,
+        force_full_sync: bool = False,
     ):
         """Run the actual sync service."""
         from airweave import crud

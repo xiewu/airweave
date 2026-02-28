@@ -652,6 +652,8 @@ class SharePoint2019V2Source(BaseSource):
                                 item_id=item_id,
                                 sp_entity_id=sp_entity_id,
                                 label=f"Deleted file {item_id} from {list_id}",
+                                deletion_status="removed",
+                                breadcrumbs=[],
                             )
                         else:
                             sp_entity_id = f"sp2019v2:item:{list_id}:{item_id}"
@@ -660,6 +662,8 @@ class SharePoint2019V2Source(BaseSource):
                                 item_id=item_id,
                                 sp_entity_id=sp_entity_id,
                                 label=f"Deleted item {item_id} from {list_id}",
+                                deletion_status="removed",
+                                breadcrumbs=[],
                             )
                         changes_processed += 1
                         continue
@@ -1067,4 +1071,4 @@ class SharePoint2019V2Source(BaseSource):
 
     def supports_incremental_acl(self) -> bool:
         """Whether this source supports incremental ACL sync via DirSync."""
-        return self.has_ad_config and getattr(self, "_supports_continuous", False)
+        return self.has_ad_config and getattr(self.__class__, "supports_continuous", False)

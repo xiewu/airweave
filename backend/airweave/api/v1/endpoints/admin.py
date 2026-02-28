@@ -11,7 +11,7 @@ from enum import Enum
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import Body, Depends, HTTPException, Query
+from fastapi import Body, Depends, HTTPException, Path, Query
 from pydantic import ConfigDict
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,7 @@ from airweave.core.context import SystemContext
 from airweave.core.context_cache_service import context_cache
 from airweave.core.exceptions import InvalidStateError, NotFoundException
 from airweave.core.organization_service import organization_service
+from airweave.core.protocols import PubSub
 from airweave.core.protocols.payment import PaymentGatewayProtocol
 from airweave.core.shared_models import AuthMethod
 from airweave.core.shared_models import FeatureFlag as FeatureFlagEnum
@@ -33,8 +34,13 @@ from airweave.core.temporal_service import temporal_service
 from airweave.crud.crud_organization_billing import organization_billing
 from airweave.db.unit_of_work import UnitOfWork
 from airweave.domains.billing.operations import BillingOperations
+from airweave.domains.billing.repository import (
+    BillingPeriodRepository,
+    OrganizationBillingRepository,
+)
 from airweave.domains.embedders.protocols import DenseEmbedderProtocol, SparseEmbedderProtocol
 from airweave.domains.source_connections.protocols import SourceConnectionServiceProtocol
+from airweave.domains.usage.repository import UsageRepository
 from airweave.integrations.auth0_management import auth0_management_client
 from airweave.models.organization import Organization
 from airweave.models.organization_billing import OrganizationBilling
@@ -699,7 +705,12 @@ async def upgrade_organization_to_enterprise(  # noqa: C901
             )
 
         # Use billing operations to create record (handles $0 subscription)
-        billing_ops = BillingOperations(payment_gateway=payment_gw)
+        billing_ops = BillingOperations(
+            billing_repo=OrganizationBillingRepository(),
+            period_repo=BillingPeriodRepository(),
+            usage_repo=UsageRepository(),
+            payment_gateway=payment_gw,
+        )
         async with UnitOfWork(db) as uow:
             await billing_ops.create_billing_record(
                 db=db,
@@ -1258,6 +1269,7 @@ async def admin_search_collection(
         AdminSearchDestination.QDRANT,
         description="Search destination: 'qdrant' (default) or 'vespa'",
     ),
+    pubsub: PubSub = Inject(PubSub),
     dense_embedder: DenseEmbedderProtocol = Inject(DenseEmbedderProtocol),
     sparse_embedder: SparseEmbedderProtocol = Inject(SparseEmbedderProtocol),
 ) -> schemas.SearchResponse:
@@ -1274,6 +1286,7 @@ async def admin_search_collection(
         db: Database session
         ctx: API context
         destination: Search destination ('qdrant' or 'vespa')
+        pubsub: PubSub adapter for event streaming
         dense_embedder: Domain dense embedder for generating neural embeddings
         sparse_embedder: Domain sparse embedder for generating BM25 embeddings
 
@@ -1293,6 +1306,7 @@ async def admin_search_collection(
         search_request=search_request,
         db=db,
         ctx=ctx,
+        pubsub=pubsub,
         dense_embedder=dense_embedder,
         sparse_embedder=sparse_embedder,
         destination=destination.value,
@@ -1314,6 +1328,7 @@ async def admin_search_collection_as_user(
         AdminSearchDestination.VESPA,
         description="Search destination: 'qdrant' or 'vespa' (default)",
     ),
+    pubsub: PubSub = Inject(PubSub),
     dense_embedder: DenseEmbedderProtocol = Inject(DenseEmbedderProtocol),
     sparse_embedder: SparseEmbedderProtocol = Inject(SparseEmbedderProtocol),
 ) -> schemas.SearchResponse:
@@ -1329,6 +1344,7 @@ async def admin_search_collection_as_user(
         db: Database session
         ctx: API context
         destination: Search destination ('qdrant' or 'vespa')
+        pubsub: PubSub adapter for event streaming
         dense_embedder: Domain dense embedder for generating neural embeddings
         sparse_embedder: Domain sparse embedder for generating BM25 embeddings
 
@@ -1348,11 +1364,52 @@ async def admin_search_collection_as_user(
         search_request=search_request,
         db=db,
         ctx=ctx,
+        pubsub=pubsub,
         user_principal=user_principal,
         dense_embedder=dense_embedder,
         sparse_embedder=sparse_embedder,
         destination=destination.value,
     )
+
+
+@router.get(
+    "/collections/{readable_id}/user-principals",
+    response_model=List[str],
+    summary="Get resolved principals for a user in a collection",
+)
+async def admin_get_user_principals(
+    readable_id: str = Path(..., description="The readable ID of the collection"),
+    user_principal: str = Query(..., description="Username to resolve principals for"),
+    db: AsyncSession = Depends(deps.get_db),
+    ctx: ApiContext = Depends(deps.get_context),
+) -> List[str]:
+    """Admin-only: Get the resolved access principals for a user in a collection.
+
+    Returns all principals (user + group memberships) that would be used for
+    access control filtering when the user searches the collection.
+
+    Principals are formatted as:
+    - "user:<username>" - direct user access
+    - "group:ad:<group_name>" - AD group membership
+    - "group:sp:<group_name>" - SharePoint group membership
+    """
+    from airweave.platform.access_control.broker import access_broker
+
+    _require_admin_permission(ctx, FeatureFlagEnum.API_KEY_ADMIN_SYNC)
+
+    collection = await crud.collection.get_by_readable_id(db, readable_id=readable_id, ctx=ctx)
+
+    access_context = await access_broker.resolve_access_context_for_collection(
+        db=db,
+        user_principal=user_principal,
+        readable_collection_id=readable_id,
+        organization_id=collection.organization_id,
+    )
+
+    if access_context is None:
+        return []
+
+    return list(access_context.all_principals)
 
 
 @router.get("/source-connections/{source_connection_id}/cursor")
@@ -1853,7 +1910,7 @@ async def admin_delete_sync(
         sync_id: The sync ID to delete
         db: Database session
         ctx: API context
-        sc_service: Source connection service for deletion logic
+        sc_service: Source connection service for deletion
 
     Returns:
         Success message with deleted sync ID

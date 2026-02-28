@@ -1,14 +1,99 @@
-"""Sync domain events.
+"""Domain events for sync, entity batches, and queries.
 
-These events are published during sync lifecycle transitions
-and consumed by webhooks, analytics, realtime, etc.
+EntityBatchProcessedEvent is emitted per resolved batch during sync
+and consumed by the billing accumulator, progress relay, and (future) delta lake writers.
+
+QueryProcessedEvent is emitted after a search completes and consumed
+by the billing accumulator for query usage tracking.
 """
 
-from typing import Optional
+from typing import Dict, Optional
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from airweave.core.events.base import DomainEvent
-from airweave.core.events.enums import SyncEventType
+from airweave.core.events.enums import (
+    AccessControlEventType,
+    EntityEventType,
+    QueryEventType,
+    SyncEventType,
+)
+
+
+class TypeActionCounts(BaseModel):
+    """Action counts for a single entity type within a batch."""
+
+    model_config = ConfigDict(frozen=True)
+
+    inserted: int = 0
+    updated: int = 0
+    deleted: int = 0
+    kept: int = 0
+
+
+class EntityBatchProcessedEvent(DomainEvent):
+    """Emitted after each entity batch is resolved and dispatched.
+
+    Carries per-type deltas for this batch. Running totals are derived
+    by consumers (progress relay, billing), not embedded in the event.
+
+    Consumers:
+    - SyncProgressRelay: Accumulates deltas, publishes snapshots to Redis PubSub
+    - UsageBillingListener: Accumulates usage (inserted + updated)
+    - (future) Delta lake writer: Appends raw event as-is
+    """
+
+    event_type: EntityEventType = EntityEventType.BATCH_PROCESSED
+
+    sync_id: UUID
+    sync_job_id: UUID
+    collection_id: UUID
+    source_connection_id: UUID
+    source_type: str = ""
+
+    inserted: int = 0
+    updated: int = 0
+    deleted: int = 0
+    kept: int = 0
+
+    type_breakdown: Dict[str, TypeActionCounts] = Field(default_factory=dict)
+
+    batch_seq: int = 0
+    batch_duration_ms: float = 0
+    billable: bool = True
+
+
+class AccessControlMembershipBatchProcessedEvent(DomainEvent):
+    """Emitted during ACL membership collection to signal progress.
+
+    Unlike EntityBatchProcessedEvent (which tracks resolved entity actions),
+    this tracks raw membership collection: how many memberships have been
+    collected and written to DB so far.
+    """
+
+    event_type: AccessControlEventType = AccessControlEventType.BATCH_PROCESSED
+
+    sync_id: UUID
+    sync_job_id: UUID
+    source_connection_id: UUID
+    source_type: str = ""
+
+    collected: int = 0
+    upserted: int = 0
+
+
+class QueryProcessedEvent(DomainEvent):
+    """Emitted after a search (or agentic search) completes.
+
+    Consumed by UsageBillingListener to record query usage.
+    """
+
+    event_type: QueryEventType = QueryEventType.PROCESSED
+
+    collection_id: Optional[UUID] = None
+    queries: int = 1
+    billable: bool = True
 
 
 class SyncLifecycleEvent(DomainEvent):

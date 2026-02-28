@@ -29,17 +29,13 @@ def create_activities() -> list:
         SelfDestructOrphanedSyncActivity,
     )
 
-    # Get dependencies from container (attribute access, not method call)
     event_bus = container.event_bus
     dense_embedder = container.dense_embedder
     sparse_embedder = container.sparse_embedder
 
     logger.debug("Wiring activities with container dependencies")
 
-    # Instantiate activities with dependencies
-    # The .run method is what Temporal calls
     return [
-        # Sync activities
         RunSyncActivity(
             event_bus=event_bus,
             dense_embedder=dense_embedder,

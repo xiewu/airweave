@@ -103,7 +103,8 @@ class QueryBuilder:
         nn_clause = " OR ".join(nn_parts)
 
         # BM25 text search clause
-        bm25_clause = f"{{targetHits:{TARGET_HITS}}}userInput(@query)"
+        # allowEmpty: true lets filter-only queries work when query is "*" or empty
+        bm25_clause = f"{{allowEmpty: true, targetHits:{TARGET_HITS}}}userInput(@query)"
 
         if strategy == "neural":
             # Pure vector search only

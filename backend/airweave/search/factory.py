@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from airweave import crud
 from airweave.api.context import ApiContext
 from airweave.core.config import settings
+from airweave.core.protocols.pubsub import PubSub
 from airweave.domains.embedders.protocols import DenseEmbedderProtocol, SparseEmbedderProtocol
 from airweave.platform.destinations._base import BaseDestination
 from airweave.platform.locator import resource_locator
@@ -71,6 +72,7 @@ class SearchFactory:
         stream: bool,
         ctx: ApiContext,
         db: AsyncSession,
+        pubsub: PubSub,
         *,
         dense_embedder: DenseEmbedderProtocol,
         sparse_embedder: SparseEmbedderProtocol,
@@ -89,6 +91,7 @@ class SearchFactory:
             stream: Whether to enable SSE streaming
             ctx: API context with auth info
             db: Database session
+            pubsub: PubSub adapter for event streaming
             dense_embedder: Domain dense embedder for generating neural embeddings
             sparse_embedder: Domain sparse embedder for generating BM25 embeddings
             destination_override: Override destination ("qdrant" or "vespa").
@@ -152,7 +155,7 @@ class SearchFactory:
         )
 
         # Create event emitter and emit skip notices if needed
-        emitter = EventEmitter(request_id=request_id, stream=stream)
+        emitter = EventEmitter(request_id=request_id, stream=stream, pubsub=pubsub)
         await self._emit_skip_notices_if_needed(emitter, has_vector_sources, params, search_request)
 
         # Build operations with destination (destination-agnostic)

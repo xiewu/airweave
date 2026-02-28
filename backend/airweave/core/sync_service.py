@@ -129,7 +129,6 @@ class SyncService:
         """
         try:
             async with get_db_context() as db:
-                # Create dedicated orchestrator instance
                 orchestrator = await SyncFactory.create_orchestrator(
                     db=db,
                     sync=sync,

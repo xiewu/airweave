@@ -14,7 +14,7 @@ from airweave.core.config import settings
 # - During batch processing, workers can hold 2-3 connections simultaneously:
 #   1. ActionResolver bulk entity hash lookup
 #   2. EntityPostgresHandler batch insert/update/delete
-#   3. GuardRailService usage flush (every 100 entities)
+#   3. Usage enforcement service flush (every 100 entities)
 # - Base pool = worker count, overflow = 2× workers for peak concurrent DB operations
 # - Example: 20 workers → 20 base + 40 overflow = 60 total connections per pod
 

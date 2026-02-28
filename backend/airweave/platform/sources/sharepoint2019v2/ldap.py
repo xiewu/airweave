@@ -44,7 +44,12 @@ LDAP_SERVER_SHOW_DELETED_OID = "1.2.840.113556.1.4.417"
 LDAP_DIRSYNC_OBJECT_SECURITY = 0x00000001  # Respect ACLs
 LDAP_DIRSYNC_ANCESTORS_FIRST_ORDER = 0x00000800  # Parents before children
 LDAP_DIRSYNC_PUBLIC_DATA_ONLY = 0x00002000  # No secret attributes
-LDAP_DIRSYNC_INCREMENTAL_VALUES = 0x80000000  # Only changed members, not full list
+# INCREMENTAL_VALUES: only return changed members, not the full list.
+# IMPORTANT: Use the signed integer value (-2147483648) instead of the unsigned
+# 0x80000000 because BER encoding treats integers as signed. Using the unsigned
+# value produces 5 bytes (00 80 00 00 00) with a leading zero byte, but AD
+# expects 4 bytes (80 00 00 00). This is a known issue with ldap3 (GitHub #642).
+LDAP_DIRSYNC_INCREMENTAL_VALUES = -2147483648  # 0x80000000 as signed int32
 
 # Composite flag sets
 # FULL: INCREMENTAL_VALUES returns only changed members (not the full list).
@@ -70,6 +75,9 @@ class DirSyncResult:
         modified_group_ids: Set of group IDs whose membership changed.
         deleted_group_ids: Set of group IDs that were deleted from AD.
         more_results: True if more pages are available.
+        incremental_values: True if INCREMENTAL_VALUES flag was used (changes
+            are deltas, not full member lists). When False, the pipeline
+            should reconcile against the DB to detect removed members.
     """
 
     changes: List[MembershipChange] = field(default_factory=list)
@@ -77,6 +85,7 @@ class DirSyncResult:
     modified_group_ids: Set[str] = field(default_factory=set)
     deleted_group_ids: Set[str] = field(default_factory=set)
     more_results: bool = False
+    incremental_values: bool = False
 
     @property
     def cookie_b64(self) -> str:
@@ -712,13 +721,14 @@ class LDAPClient:
             """BER-encode a signed integer."""
             if value == 0:
                 return b"\x02\x01\x00"
-            # Determine byte length needed
-            if value > 0:
-                length = (value.bit_length() + 8) // 8  # +1 for sign, round up
-            else:
-                length = (value.bit_length() + 9) // 8
-            int_bytes = value.to_bytes(length, byteorder="big", signed=True)
-            return b"\x02" + bytes([len(int_bytes)]) + int_bytes
+            # Find minimum byte length for signed two's complement
+            for length in range(1, 16):
+                try:
+                    int_bytes = value.to_bytes(length, byteorder="big", signed=True)
+                    return b"\x02" + bytes([length]) + int_bytes
+                except OverflowError:
+                    continue
+            raise ValueError(f"Integer too large to BER-encode: {value}")
 
         def _ber_encode_octet_string(data: bytes) -> bytes:
             """BER-encode an OCTET STRING."""
@@ -824,11 +834,15 @@ class LDAPClient:
         all_changes: List[MembershipChange] = []
         all_modified_ids: Set[str] = set()
         all_deleted_ids: Set[str] = set()
+        used_incremental_values = False
         page = 0
 
         while True:
             page += 1
-            result = await self._execute_dirsync_query_with_flags(
+            # Use FULL flags (includes INCREMENTAL_VALUES). If the server
+            # rejects these flags, DirSyncPermissionError propagates up to
+            # _process_incremental which falls back to a full sync.
+            result = await self._execute_dirsync_query(
                 cookie=cookie,
                 is_initial=is_initial,
                 flags=DIRSYNC_FLAGS_FULL,
@@ -837,6 +851,7 @@ class LDAPClient:
             all_changes.extend(result.changes)
             all_modified_ids.update(result.modified_group_ids)
             all_deleted_ids.update(result.deleted_group_ids)
+            used_incremental_values = used_incremental_values or result.incremental_values
             cookie = result.new_cookie
 
             self.logger.debug(
@@ -860,38 +875,8 @@ class LDAPClient:
             modified_group_ids=all_modified_ids,
             deleted_group_ids=all_deleted_ids,
             more_results=False,
+            incremental_values=used_incremental_values,
         )
-
-    async def _execute_dirsync_query_with_flags(
-        self,
-        cookie: bytes,
-        is_initial: bool,
-        flags: int,
-    ) -> DirSyncResult:
-        """Execute DirSync with given flags, falling back to basic on permission error.
-
-        Reconnects the LDAP connection before retrying with reduced flags,
-        since AD may leave the connection in an unusable state after rejecting
-        a critical extension.
-
-        Args:
-            cookie: DirSync cookie bytes.
-            is_initial: Whether this is the first sync (no prior cookie).
-            flags: DirSync flags bitmask.
-
-        Returns:
-            DirSyncResult with changes.
-        """
-        try:
-            return await self._execute_dirsync_query(cookie, is_initial, flags)
-        except DirSyncPermissionError:
-            if flags != DIRSYNC_FLAGS_BASIC:
-                self.logger.warning(
-                    "DirSync with full flags failed, reconnecting and retrying with basic flags"
-                )
-                await self.connect(force_reconnect=True)
-                return await self._execute_dirsync_query(cookie, is_initial, DIRSYNC_FLAGS_BASIC)
-            raise
 
     async def _execute_dirsync_query(
         self,
@@ -966,8 +951,10 @@ class LDAPClient:
         dirsync_ctrl = self._build_dirsync_control(cookie=cookie, flags=flags)
         show_deleted_ctrl = (LDAP_SERVER_SHOW_DELETED_OID, True, None)
 
-        # Search for group objects with member attribute
-        search_filter = "(&(objectClass=group)(objectCategory=group))"
+        # Search for group objects. Use only objectClass (not objectCategory)
+        # because AD removes objectCategory from tombstones -- a filter with
+        # objectCategory would silently miss deleted groups.
+        search_filter = "(objectClass=group)"
         attributes = ["sAMAccountName", "member", "distinguishedName", "objectGUID", "isDeleted"]
 
         try:
@@ -993,6 +980,10 @@ class LDAPClient:
                 raise DirSyncPermissionError(
                     f"DirSync requires stronger auth or privileges: {description}"
                 )
+            if result_code == 12:  # unavailableCriticalExtension
+                raise DirSyncPermissionError(
+                    f"DirSync flag not supported by server (try basic flags): {description}"
+                )
             self.logger.warning(f"DirSync search failed: {result_code} {description}")
             # Return empty result with same cookie (retry next time)
             return DirSyncResult(new_cookie=cookie)
@@ -1013,6 +1004,7 @@ class LDAPClient:
             modified_group_ids=modified_ids,
             deleted_group_ids=deleted_ids,
             more_results=more_results,
+            incremental_values=incremental_mode,
         )
 
     def _process_dirsync_entries(  # noqa: C901
@@ -1038,13 +1030,19 @@ class LDAPClient:
         for entry in entries:
             group_name = self._get_entry_attr(entry, "sAMAccountName")
 
-            # In incremental DirSync, sAMAccountName may not be returned for
-            # entries where only the member attribute changed. Fall back to
-            # extracting CN from the distinguishedName.
+            # In incremental DirSync (especially with BASIC flags=0x0),
+            # sAMAccountName may not be returned for entries where only the
+            # member attribute changed. Fall back to extracting CN from the DN.
+            # Try three sources: distinguishedName attribute, entry_dn property
+            # (always available in ldap3), and objectGUID lookup.
             if not group_name:
                 dn = self._get_entry_attr(entry, "distinguishedName")
+                # ldap3 entry_dn is always present even when distinguishedName
+                # is not returned as an attribute by DirSync
+                if not dn:
+                    dn = getattr(entry, "entry_dn", None)
                 if dn:
-                    cn_match = re.match(r"CN=([^,]+)", dn, re.IGNORECASE)
+                    cn_match = re.match(r"CN=([^,]+)", str(dn), re.IGNORECASE)
                     if cn_match:
                         group_name = cn_match.group(1)
                         self.logger.debug(
@@ -1053,6 +1051,12 @@ class LDAPClient:
             if not group_name:
                 self.logger.debug("DirSync: skipping entry with no sAMAccountName or DN")
                 continue
+
+            # AD tombstones append "\0ADEL:<GUID>" to the CN (e.g.
+            # "MyGroup\0ADEL:abc-123"). The \0A is the LDAP-escaped form of
+            # the newline character (0x0A). Strip this suffix so the group_id
+            # matches what was stored when the group was alive.
+            group_name = re.split(r"\\0[Aa]DEL:|\nDEL:", group_name, maxsplit=1)[0]
 
             group_id = f"ad:{group_name.lower()}"
             is_deleted = self._get_entry_attr(entry, "isDeleted")
@@ -1140,12 +1144,14 @@ class LDAPClient:
     ) -> Tuple[List[str], List[str]]:
         """Extract added and removed member DNs from a DirSync entry.
 
-        In incremental mode with INCREMENTAL_VALUES flag:
-        - The "member" attribute contains ADDED members
-        - Removed members appear in ranged attributes like "member;range=0-0"
-          accessible via entry.entry_attributes
+        In incremental mode with INCREMENTAL_VALUES flag, AD uses ranged
+        attributes to encode link value changes:
+        - "member;range=1-1" = ADDED members (link present, fIsPresent=TRUE)
+        - "member;range=0-0" = REMOVED members (link absent, fIsPresent=FALSE)
+        - The plain "member" attribute is empty in incremental mode.
 
-        In full mode, all members are treated as "added".
+        In full mode (BASIC flags), the plain "member" attribute contains
+        the complete member list, and all are treated as "added".
 
         Args:
             entry: LDAP search result entry.
@@ -1157,7 +1163,7 @@ class LDAPClient:
         added: List[str] = []
         removed: List[str] = []
 
-        # Get the "member" attribute (added members in incremental mode, all in full)
+        # Get the plain "member" attribute
         try:
             member_attr = getattr(entry, "member", None)
             if member_attr is not None:
@@ -1181,31 +1187,52 @@ class LDAPClient:
             added = [str(dn) for dn in members_raw if dn]
             return added, removed
 
-        # Incremental mode -- "member" attribute has added DNs
+        # Incremental mode -- plain "member" may have values too (treat as adds)
         added = [str(dn) for dn in members_raw if dn]
 
-        # Look for removed members in ranged attributes.
-        # AD DirSync with INCREMENTAL_VALUES encodes removals as ranged attributes
-        # like "member;range=0-0" in the entry's attribute list.
+        # Parse ranged attributes for incremental changes.
+        # AD DirSync with INCREMENTAL_VALUES encodes changes as:
+        #   member;range=1-1  →  ADDED members (link is present)
+        #   member;range=0-0  →  REMOVED members (link is absent/deleted)
+        # The range values map to the fIsPresent field in MS-DRSR REPLVALINF.
         try:
             entry_attrs = getattr(entry, "entry_attributes", [])
             for attr_name in entry_attrs:
                 attr_str = str(attr_name)
-                if attr_str.startswith("member;range="):
-                    # This is a removal range -- get its values
-                    try:
-                        range_attr = getattr(entry, attr_str, None)
-                        if range_attr is not None:
-                            range_vals = getattr(range_attr, "values", None) or getattr(
-                                range_attr, "value", None
-                            )
-                            if range_vals is None:
-                                continue
-                            if isinstance(range_vals, str):
-                                range_vals = [range_vals]
-                            removed.extend(str(dn) for dn in range_vals if dn)
-                    except (AttributeError, TypeError):
-                        pass
+                if not attr_str.startswith("member;range="):
+                    continue
+
+                # Extract range values to determine add vs remove
+                range_suffix = attr_str[len("member;range=") :]  # e.g. "1-1" or "0-0"
+
+                try:
+                    range_attr = getattr(entry, attr_str, None)
+                    if range_attr is None:
+                        continue
+                    range_vals = getattr(range_attr, "values", None) or getattr(
+                        range_attr, "value", None
+                    )
+                    if range_vals is None:
+                        continue
+                    if isinstance(range_vals, str):
+                        range_vals = [range_vals]
+                    dns = [str(dn) for dn in range_vals if dn]
+                except (AttributeError, TypeError):
+                    continue
+
+                if range_suffix.startswith("1"):
+                    # member;range=1-1 → link is present → ADD
+                    added.extend(dns)
+                elif range_suffix.startswith("0"):
+                    # member;range=0-0 → link is absent → REMOVE
+                    removed.extend(dns)
+                else:
+                    # Unknown range format — log and treat as add (safe default)
+                    self.logger.warning(
+                        f"DirSync: unexpected member range format '{attr_str}', "
+                        f"treating {len(dns)} values as adds"
+                    )
+                    added.extend(dns)
         except (AttributeError, TypeError):
             pass
 

@@ -20,6 +20,7 @@ from airweave.core.protocols import (
     HealthServiceProtocol,
     MetricsService,
     OcrProvider,
+    PubSub,
     WebhookAdmin,
     WebhookPublisher,
     WebhookServiceProtocol,
@@ -47,6 +48,7 @@ from airweave.domains.oauth.protocols import (
     OAuthInitSessionRepositoryProtocol,
     OAuthRedirectSessionRepositoryProtocol,
 )
+from airweave.domains.organizations.protocols import UserOrganizationRepositoryProtocol
 from airweave.domains.source_connections.protocols import (
     ResponseBuilderProtocol,
     SourceConnectionRepositoryProtocol,
@@ -69,6 +71,7 @@ from airweave.domains.temporal.protocols import (
     TemporalScheduleServiceProtocol,
     TemporalWorkflowServiceProtocol,
 )
+from airweave.domains.usage.protocols import UsageLedgerProtocol, UsageLimitCheckerProtocol
 
 
 @dataclass(frozen=True)
@@ -95,6 +98,9 @@ class Container:
 
     # Event bus for domain event fan-out
     event_bus: EventBus
+
+    # PubSub for realtime message transport (SSE, sync progress)
+    pubsub: PubSub
 
     # Webhook protocols
     webhook_publisher: WebhookPublisher
@@ -123,6 +129,7 @@ class Container:
     collection_repo: CollectionRepositoryProtocol
     conn_repo: ConnectionRepositoryProtocol
     cred_repo: IntegrationCredentialRepositoryProtocol
+    user_org_repo: UserOrganizationRepositoryProtocol
 
     # OAuth services
     oauth1_service: OAuth1ServiceProtocol
@@ -156,6 +163,10 @@ class Container:
     # Billing domain
     billing_service: BillingServiceProtocol
     billing_webhook: BillingWebhookProtocol
+
+    # Usage domain — read (checker) + write (ledger), both singletons
+    usage_checker: UsageLimitCheckerProtocol
+    usage_ledger: UsageLedgerProtocol
 
     payment_gateway: PaymentGatewayProtocol
 
